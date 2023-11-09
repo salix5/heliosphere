@@ -15,12 +15,15 @@
     "yugioh",
     "ygo",
     "query",
-	"Discord-bot"
+    "Discord-bot"
   ],
   "author": "salix5",
   "license": "MIT",
   "dependencies": {
     "discord.js": "14.x",
     "sql.js": "^1.8.0"
+  },
+  "engines": {
+    "node": "20.x"
   }
 }
