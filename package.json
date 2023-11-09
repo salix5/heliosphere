@@ -1,0 +1,26 @@
+{
+  "name": "heliosphere",
+  "version": "1.0.0",
+  "description": "A Discord card query bot supporting multiple language.",
+  "type": "module",
+  "main": "./bot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/salix5/heliosphere"
+  },
+  "keywords": [
+    "yugioh",
+    "ygo",
+    "query",
+	"Discord-bot"
+  ],
+  "author": "salix5",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "14.x",
+    "sql.js": "^1.8.0"
+  }
+}
