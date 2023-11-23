@@ -71,7 +71,7 @@ export function create_reply(card, locale) {
 		const button1 = new ButtonBuilder()
 			.setStyle(ButtonStyle.Link)
 			.setLabel('Yugipedia')
-			.setURL(ygo.print_wiki_link(card.id));
+			.setURL(ygo.print_yp_link(card.id));
 		const row1 = new ActionRowBuilder().addComponents(button1);
 		return { content: ygo.print_card(card, locale), components: [row1] };
 	}
