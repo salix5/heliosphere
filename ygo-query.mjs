@@ -233,7 +233,7 @@ md_table['ja'] = md_name_jp;
 export const cid_inverse = inverse_mapping(cid_table);
 
 const db_list = [];
-let load_prerelease = true;
+let load_prerelease = false;
 
 const domain = 'https://salix5.github.io/cdb';
 const fetch_db = fetch(`${domain}/cards.cdb`).then(response => response.arrayBuffer());
