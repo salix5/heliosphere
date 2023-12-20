@@ -232,21 +232,17 @@ md_table['ja'] = md_name_jp;
 
 export const cid_inverse = inverse_mapping(cid_table);
 
-const db_list = [];
-let load_prerelease = false;
-
 const domain = 'https://salix5.github.io/cdb';
 const fetch_db = fetch(`${domain}/cards.cdb`).then(response => response.arrayBuffer());
 const fetch_db2 = fetch(`${domain}/expansions/pre-release.cdb`).then(response => response.arrayBuffer());
 const [SQL, buf1, buf2] = await Promise.all([initSqlJs(), fetch_db, fetch_db2]);
+const db_list = [];
 db_list.push(new SQL.Database(new Uint8Array(buf1)));
-if (load_prerelease) {
-	db_list.push(new SQL.Database(new Uint8Array(buf2)));
-}
+db_list.push(new SQL.Database(new Uint8Array(buf2)));
 
 /**
- * Query card from `db` using statement `qstr` and binding object `arg`.
- * The results are put in `ret`.
+ * Query cards from `db` using statement `qstr` and binding object `arg`, and put the results in `ret`.
+ * scale = level >> 24
  * @param {initSqlJs.Database} db 
  * @param {string} qstr 
  * @param {Object} arg 
@@ -816,7 +812,7 @@ export function print_db_link(cid, request_locale) {
 }
 
 export function print_yp_link(id) {
-	return `https://yugipedia.com/wiki/${id}`;
+	return `https://yugipedia.com/wiki/${id.toString().padStart(8, '0')}`;
 }
 
 export function print_qa_link(cid) {
