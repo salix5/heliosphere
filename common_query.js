@@ -64,6 +64,11 @@ export function create_reply(card, locale) {
 				.setLabel('Q&A')
 				.setURL(ygo.print_qa_link(card.cid));
 			row1.addComponents(button2);
+			const button3 = new ButtonBuilder()
+				.setStyle(ButtonStyle.Link)
+				.setLabel('History')
+				.setURL(ygo.print_history_link(card.cid));
+			row1.addComponents(button3);
 		}
 		return { content: ygo.print_card(card, locale), components: [row1] };
 	}
