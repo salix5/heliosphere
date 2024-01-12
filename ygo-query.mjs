@@ -102,13 +102,13 @@ const LINK_MARKER_TOP_LEFT = 0x040;		// ↖
 const LINK_MARKER_TOP = 0x080;			// ↑
 const LINK_MARKER_TOP_RIGHT = 0x100;	// ↗
 
-export const type = {
+const type = {
 	TYPE_MONSTER,
 	TYPE_SPELL,
 	TYPE_TRAP,
 };
 
-export const monster_type = {
+const monster_type = {
 	TYPE_NORMAL,
 	TYPE_EFFECT,
 	TYPE_FUSION,
@@ -129,7 +129,7 @@ export const monster_type = {
 	TYPE_SPSUMMON,
 };
 
-export const spell_type = {
+const spell_type = {
 	TYPE_QUICKPLAY,
 	TYPE_CONTINUOUS,
 	TYPE_EQUIP,
@@ -137,12 +137,12 @@ export const spell_type = {
 	TYPE_FIELD,
 };
 
-export const trap_type = {
+const trap_type = {
 	TYPE_CONTINUOUS,
 	TYPE_COUNTER,
 };
 
-export const race = {
+const race = {
 	RACE_WARRIOR,
 	RACE_SPELLCASTER,
 	RACE_FAIRY,
@@ -171,7 +171,7 @@ export const race = {
 	RACE_ILLUSION,
 };
 
-export const attribute = {
+const attribute = {
 	ATTRIBUTE_EARTH,
 	ATTRIBUTE_WATER,
 	ATTRIBUTE_FIRE,
@@ -181,7 +181,7 @@ export const attribute = {
 	ATTRIBUTE_DIVINE,
 };
 
-export const link_marker = {
+const link_marker = {
 	LINK_MARKER_BOTTOM_LEFT,
 	LINK_MARKER_BOTTOM,
 	LINK_MARKER_BOTTOM_RIGHT,
@@ -194,43 +194,59 @@ export const link_marker = {
 	LINK_MARKER_TOP_RIGHT,
 };
 
+export { type, monster_type, spell_type, trap_type, race, attribute, link_marker };
+
 // special ID
-export const ID_TYLER_THE_GREAT_WARRIOR = 68811206;
-export const ID_BLACK_LUSTER_SOLDIER = 5405695;
-export const CID_BLACK_LUSTER_SOLDIER = 19092;
+const ID_TYLER_THE_GREAT_WARRIOR = 68811206;
+const ID_BLACK_LUSTER_SOLDIER = 5405695;
+const CID_BLACK_LUSTER_SOLDIER = 19092;
 
-export const select_all = `SELECT datas.id, ot, alias, type, atk, def, level, attribute, race, name, desc FROM datas, texts WHERE datas.id == texts.id`;
-export const select_id = `SELECT datas.id FROM datas, texts WHERE datas.id == texts.id`;
+const select_all = `SELECT datas.id, ot, alias, type, atk, def, level, attribute, race, name, desc FROM datas, texts WHERE datas.id == texts.id`;
+const select_id = `SELECT datas.id FROM datas, texts WHERE datas.id == texts.id`;
 
-export const base_filter = ` AND datas.id != ${ID_TYLER_THE_GREAT_WARRIOR} AND NOT type & ${TYPE_TOKEN}`;
-export const physical_filter = `${base_filter} AND (datas.id == ${ID_BLACK_LUSTER_SOLDIER} OR abs(datas.id - alias) >= 10)`;
-export const effect_filter = ` AND (NOT type & ${TYPE_NORMAL} OR type & ${TYPE_PENDULUM})`;
+const base_filter = ` AND datas.id != ${ID_TYLER_THE_GREAT_WARRIOR} AND NOT type & ${TYPE_TOKEN}`;
+const physical_filter = `${base_filter} AND (datas.id == ${ID_BLACK_LUSTER_SOLDIER} OR abs(datas.id - alias) >= 10)`;
+const effect_filter = ` AND (NOT type & ${TYPE_NORMAL} OR type & ${TYPE_PENDULUM})`;
 
-export const stmt_default = `${select_all}${physical_filter}`;
-export const stmt_no_alias = `${select_id}${base_filter} AND alias == 0`;
+const stmt_default = `${select_all}${physical_filter}`;
+const stmt_no_alias = `${select_id}${base_filter} AND alias == 0`;
 
-export const lang = Object.create(null);
+export {
+	ID_TYLER_THE_GREAT_WARRIOR, ID_BLACK_LUSTER_SOLDIER, CID_BLACK_LUSTER_SOLDIER,
+	select_all, select_id, base_filter, physical_filter, effect_filter, stmt_default, stmt_no_alias
+};
+
+
+const lang = Object.create(null);
 lang['en'] = lang_en;
 lang['ja'] = lang_ja;
 lang['ko'] = lang_ko;
 lang['zh-tw'] = lang_zhtw;
 
-export const official_name = Object.create(null);
+const official_name = Object.create(null);
 official_name['en'] = 'en_name';
 official_name['ja'] = 'jp_name';
 official_name['ko'] = 'kr_name';
 
-export const name_table = Object.create(null);
+const name_table = Object.create(null);
 name_table['en'] = name_table_en;
 name_table['ja'] = name_table_jp;
 name_table['ko'] = name_table_kr;
 name_table['md'] = md_name;
 
-export const md_table = Object.create(null);
+const md_table = Object.create(null);
 md_table['en'] = md_name_en;
 md_table['ja'] = md_name_jp;
 
-export const cid_inverse = inverse_mapping(cid_table);
+const cid_inverse = inverse_mapping(cid_table);
+
+// id -> option
+const option_table = Object.create(null);
+option_table['en'] = create_options('en');
+option_table['ja'] = create_options('ja');
+option_table['ko'] = create_options('ko');
+
+export { lang, official_name, cid_table, name_table, md_table, cid_inverse, option_table };
 
 const domain = 'https://salix5.github.io/cdb';
 const fetch_db = fetch(`${domain}/cards.cdb`).then(response => response.arrayBuffer());
@@ -358,6 +374,47 @@ function query_db(db, qstr, arg, ret) {
 	stmt.free();
 }
 
+function create_options(request_locale) {
+	let postfix = '';
+	switch (request_locale) {
+		case 'en':
+			postfix = ' (Normal)';
+			break;
+		case 'ja':
+			postfix = '（通常モンスター）';
+			break;
+		case 'ko':
+			postfix = ' (일반)';
+			break;
+		default:
+			return Object.create(null);
+	}
+	const options = Object.create(null);
+	for (const [cid, name] of Object.entries(name_table[request_locale])) {
+		if (!cid_inverse[cid]) {
+			console.error(`unknown cid:`, cid);
+			continue;
+		}
+		if (cid == CID_BLACK_LUSTER_SOLDIER)
+			options[cid_inverse[cid]] = `${name}${postfix}`;
+		else
+			options[cid_inverse[cid]] = name;
+	}
+	if (md_table[request_locale]) {
+		for (const [cid, name] of Object.entries(md_table[request_locale])) {
+			if (!cid_inverse[cid]) {
+				console.error(`unknown cid:`, cid);
+				continue;
+			}
+			if (options[cid_inverse[cid]]) {
+				console.error(`duplicate cid: md_table[${request_locale}]`, cid);
+				continue;
+			}
+			options[cid_inverse[cid]] = name;
+		}
+	}
+	return options;
+}
 
 // export
 /**
@@ -372,57 +429,34 @@ export function inverse_mapping(obj) {
 			console.error('non-invertible', `${key}: ${value}`);
 			return Object.create(null);
 		}
-		inverse[value] = key;
+		inverse[value] = parseInt(key);
 	}
 	return inverse;
 }
 
 /**
- * Create the name to id table of region `locale`
+ * Create the option to id table of region `request_locale`
  * @param {string} request_locale 
  * @returns {Object}
  */
 export function create_choice(request_locale) {
-	const temp_table = Object.create(null);
-	Object.assign(temp_table, name_table[request_locale]);
-	let postfix = '';
 	let locale = '';
 	switch (request_locale) {
 		case 'en':
-			postfix = ' (Normal)';
 			locale = 'en-US';
 			break;
 		case 'ja':
-			postfix = '（通常モンスター）';
 			locale = 'ja-JP';
 			break;
 		case 'ko':
-			postfix = ' (일반)';
 			locale = 'ko-KR';
 			break;
 		default:
 			return Object.create(null);
 	}
-	if (temp_table[CID_BLACK_LUSTER_SOLDIER])
-		temp_table[CID_BLACK_LUSTER_SOLDIER] = `${temp_table[CID_BLACK_LUSTER_SOLDIER]}${postfix}`;
-	if (md_table[request_locale]) {
-		for (const [cid, name] of Object.entries(md_table[request_locale])) {
-			if (temp_table[cid]) {
-				console.error(`md_table[${request_locale}]`, cid);
-				continue;
-			}
-			temp_table[cid] = name;
-		}
-	}
-
-	const inverse = inverse_mapping(temp_table);
-	const result = Object.create(null);
-	for (const [name, cid] of Object.entries(inverse)) {
-		result[name] = parseInt(cid_inverse[cid]);
-	}
+	const inverse = inverse_mapping(option_table[request_locale]);
 	const collator = new Intl.Collator(locale);
-	const ret = Object.create(null);
-	return Object.assign(ret, Object.fromEntries(Object.entries(result).sort((a, b) => collator.compare(a[0], b[0]))));
+	return Object.assign(Object.create(null), Object.fromEntries(Object.entries(inverse).sort((a, b) => collator.compare(a[0], b[0]))));
 }
 
 /**
