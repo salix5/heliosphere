@@ -240,7 +240,7 @@ md_table['ja'] = md_name_jp;
 
 const cid_inverse = inverse_mapping(cid_table);
 
-// id -> option
+// id -> option name
 const option_table = Object.create(null);
 option_table['en'] = create_options('en');
 option_table['ja'] = create_options('ja');
@@ -557,7 +557,7 @@ export function get_card(id) {
 		if (ret.length)
 			return ret[0];
 	}
-	return Object.create(null);
+	return null;
 }
 
 /**

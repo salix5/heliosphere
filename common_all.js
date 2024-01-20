@@ -3,15 +3,18 @@ import { create_choice, option_table } from "./ygo-query.mjs";
 import choice_ruby from './commands_data/choices_ruby.json' assert { type: 'json' };
 
 const MAX_CHOICE = 25;
+
+// option name -> id
 const choice_table = Object.create(null);
 choice_table['en'] = create_choice('en');
 choice_table['ja'] = create_choice('ja');
 choice_table['ko'] = create_choice('ko');
 
-const choice_filter_table = Object.create(null);
-choice_filter_table['en'] = lowercase_table(choice_table['en']);
-choice_filter_table['ja'] = half_width_table(choice_table['ja']);
-choice_filter_table['ko'] = choice_table['ko'];
+const ruby_entries = Object.entries(choice_ruby);
+const choice_entries = Object.create(null);
+choice_entries['en'] = Object.entries(choice_table['en']);
+choice_entries['ja'] = half_width_entries(choice_table['ja']);
+choice_entries['ko'] = Object.entries(choice_table['ko']);
 
 export { choice_table };
 
@@ -43,18 +46,10 @@ function is_equal(a, b) {
 	return toHalfWidth(a.toLowerCase()) === toHalfWidth(b.toLowerCase());
 }
 
-function half_width_table(choices) {
-	const result = Object.create(null);
+function half_width_entries(choices) {
+	const result = [];
 	for (const [name, id] of Object.entries(choices)) {
-		result[toHalfWidth(name)] = id;
-	}
-	return result;
-}
-
-function lowercase_table(choices) {
-	const result = Object.create(null);
-	for (const [name, id] of Object.entries(choices)) {
-		result[name.toLowerCase()] = id;
+		result.push([toHalfWidth(name), id]);
 	}
 	return result;
 }
@@ -62,19 +57,20 @@ function lowercase_table(choices) {
 /**
  * filter_choice()
  * @param {AutocompleteInteraction} interaction 
- * @param {Object} choice_filter 
+ * @param {[string, number][]} entries 
  * @returns id list
  */
-function filter_choice(interaction, choice_filter) {
+function filter_choice(interaction, entries) {
 	const focused = interaction.options.getFocused();
 	const starts_with = [];
 	const other = [];
-	const keyword = toHalfWidth(focused);
-	const result = Object.entries(choice_filter).filter(([choice, id]) => choice.includes(keyword));
-	for (const [choice, id] of result) {
-		if (choice.startsWith(keyword))
+	const keyword = toHalfWidth(focused).replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
+	const start = new RegExp(`^${keyword}`);
+	const include = new RegExp(`${keyword}`);
+	for (const [choice, id] of entries) {
+		if (start.test(choice))
 			starts_with.push(id);
-		else
+		else if (include.test(choice))
 			other.push(id);
 		if (starts_with.length >= MAX_CHOICE)
 			return starts_with;
@@ -95,17 +91,21 @@ export async function autocomplete_jp(interaction) {
 		await interaction.respond([]);
 		return;
 	}
-	let ret = filter_choice(interaction, choice_filter_table['ja']);
+	let ret = filter_choice(interaction, choice_entries['ja']);
 	if (ret.length < MAX_CHOICE) {
 		const ruby_max_length = MAX_CHOICE - ret.length;
 		const starts_with = [];
 		const other = [];
 		const id_set = new Set(ret);
-		const ruby_result = Object.entries(choice_ruby).filter(([ruby, id]) => !id_set.has(id) && ruby.includes(focused));
-		for (const [ruby, id] of ruby_result) {
-			if (ruby.startsWith(focused))
+		let keyword = focused.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
+		const start = new RegExp(`^${keyword}`);
+		const include = new RegExp(`${keyword}`);
+		for (const [ruby, id] of ruby_entries) {
+			if (id_set.has(id))
+				continue;
+			if (start.test(ruby))
 				starts_with.push(id);
-			else
+			else if (include.test(ruby))
 				other.push(id);
 			if (starts_with.length >= ruby_max_length)
 				break;
@@ -129,42 +129,31 @@ export async function autocomplete_jp(interaction) {
  */
 export async function autocomplete_default(interaction, request_locale) {
 	const focused = interaction.options.getFocused();
-	if (!focused) {
+	if (!focused || !choice_table[request_locale]) {
 		await interaction.respond([]);
 		return;
 	}
 	const starts_with = [];
 	const other = [];
-	const choice_filter = choice_filter_table[request_locale];
-	let keyword = '';
-	switch (request_locale) {
-		case 'en':
-			keyword = focused.toLowerCase();
-			break;
-		case 'ko':
-			keyword = focused;
-			break;
-		default:
-			await interaction.respond([]);
-			return;
-	}
-	let result = Object.entries(choice_filter).filter(([choice, id]) => choice.includes(keyword));
-	for (const [choice, id] of result) {
-		if (choice.startsWith(keyword))
-			starts_with.push(id);
-		else
-			other.push(id);
+	let keyword = focused.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
+	const start = new RegExp(`^${keyword}`, 'i');
+	const include = new RegExp(`${keyword}`, 'i');
+	for (const [choice, id] of choice_entries[request_locale]) {
+		if (start.test(choice))
+			starts_with.push(choice);
+		else if (include.test(choice))
+			other.push(choice);
 		if (starts_with.length >= MAX_CHOICE)
 			break;
 	}
 	let ret;
-	if (starts_with.length >= MAX_CHOICE)
+	if (starts_with.length >= MAX_CHOICE) 
 		ret = starts_with;
 	else
 		ret = starts_with.concat(other);
 	if (ret.length > MAX_CHOICE)
 		ret.length = MAX_CHOICE;
 	await interaction.respond(
-		ret.map(id => ({ name: option_table[request_locale][id], value: option_table[request_locale][id] }))
+		ret.map(choice => ({ name: choice, value: choice }))
 	);
 }

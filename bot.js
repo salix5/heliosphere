@@ -38,6 +38,10 @@ client.once(Events.ClientReady, c => {
 
 client.on(Events.MessageCreate, async msg => {
 	if (msg.channel.type === ChannelType.DM) {
+		if (msg.author.id != msg.client.user.id) {
+			console.log(msg.author.id);
+			console.log(msg.content.substring(0, 20));
+		}
 		if (msg.content === "d!") {
 			let history = await msg.channel.messages.fetch();
 			let list_delete = [];
