@@ -201,7 +201,7 @@ const ID_TYLER_THE_GREAT_WARRIOR = 68811206;
 const ID_BLACK_LUSTER_SOLDIER = 5405695;
 const CID_BLACK_LUSTER_SOLDIER = 19092;
 
-const select_all = `SELECT datas.id, ot, alias, type, atk, def, level, attribute, race, name, desc FROM datas, texts WHERE datas.id == texts.id`;
+const select_all = `SELECT datas.id, ot, alias, setcode, type, atk, def, level, attribute, race, name, desc FROM datas, texts WHERE datas.id == texts.id`;
 const select_id = `SELECT datas.id FROM datas, texts WHERE datas.id == texts.id`;
 
 const base_filter = ` AND datas.id != ${ID_TYLER_THE_GREAT_WARRIOR} AND NOT type & ${TYPE_TOKEN}`;
@@ -257,26 +257,102 @@ db_list.push(new SQL.Database(new Uint8Array(buf1)));
 db_list.push(new SQL.Database(new Uint8Array(buf2)));
 
 /**
+ * @typedef {Object} Card
+ * @property {number} id
+ * @property {number} ot
+ * @property {number} alias
+ * @property {number[]} setcode
+ * @property {number} real_id - The id of real card
+ * 
+ * @property {number} type
+ * @property {number} color - Card color for sorting
+ * @property {number} atk
+ * @property {number} def
+ * @property {number} level
+ * @property {number} scale
+ * @property {number} race
+ * @property {number} attribute
+ * 
+ * @property {string} tw_name
+ * @property {string} desc
+ * 
+ * @property {number} [cid]
+ * @property {string} [en_name]
+ * @property {string} [jp_name]
+ * @property {string} [kr_name]
+ * @property {string} [md_name]
+ * @property {string} [md_name_en]
+ * @property {string} [md_name_jp]
+ */
+
+const extra_setcode = {
+	8512558: [0x8f, 0x54, 0x59, 0x82, 0x13a],
+};
+
+/**
+ * Set `card.setcode` from int64.
+ * @param {Card} card 
+ * @param {bigint} setcode 
+ */
+function set_setcode(card, setcode) {
+	while (setcode) {
+		if (setcode & 0xffffn) {
+			card.setcode.push(Number(setcode & 0xffffn));
+		}
+		setcode = setcode >> 16n;
+	}
+}
+
+/**
+ * Check if `card.setode` contains `value`.
+ * @param {Card} card 
+ * @param {number} value 
+ * @returns
+ */
+function is_setcode(card, value) {
+	const settype = value & 0x0fff;
+	const setsubtype = value & 0xf000;
+	for (const x of card.setcode) {
+		if ((x & 0x0fff) === settype && (x & 0xf000 & setsubtype) === setsubtype)
+			return true;
+	}
+	return false;
+}
+
+/**
  * Query cards from `db` using statement `qstr` and binding object `arg`, and put the results in `ret`.
  * scale = level >> 24
  * @param {initSqlJs.Database} db 
  * @param {string} qstr 
  * @param {Object} arg 
- * @param {Object[]} ret  
+ * @param {Card[]} ret  
  */
 function query_db(db, qstr, arg, ret) {
 	if (!db)
 		return;
 
-	let stmt = db.prepare(qstr);
+	const stmt = db.prepare(qstr);
 	stmt.bind(arg);
 	while (stmt.step()) {
-		let cdata = stmt.getAsObject();
-		let card = Object.create(null);
+		const cdata = stmt.getAsObject(null, { useBigInt: true });
+		const card = Object.create(null);
 		for (const [column, value] of Object.entries(cdata)) {
 			switch (column) {
+				case 'setcode':
+					card.setcode = [];
+					if (value) {
+						if (extra_setcode[card.id]) {
+							for (const x of extra_setcode[card.id]) {
+								card.setcode.push(x);
+							}
+						}
+						else {
+							set_setcode(card, value);
+						}
+					}
+					break;
 				case 'type':
-					card[column] = value;
+					card[column] = Number(value);
 					if (card.type & TYPE_MONSTER) {
 						if (!(card.type & TYPE_EXTRA)) {
 							if (card.type & TYPE_TOKEN)
@@ -334,14 +410,17 @@ function query_db(db, qstr, arg, ret) {
 					}
 					break;
 				case 'level':
-					card.level = value & 0xff;
-					card.scale = (value >> 24) & 0xff;
+					card.level = Number(value) & 0xff;
+					card.scale = (Number(value) >>> 24) & 0xff;
 					break;
 				case 'name':
 					card.tw_name = value;
 					break;
 				default:
-					card[column] = value;
+					if (typeof value === 'bigint')
+						card[column] = Number(value);
+					else
+						card[column] = value;
 					break;
 			}
 		}
@@ -349,7 +428,7 @@ function query_db(db, qstr, arg, ret) {
 		if ('id' in card && 'alias' in card) {
 			card.real_id = is_alternative(card) ? card.alias : card.id;
 		}
-		if ('real_id' in card && typeof cid_table[card.real_id] === 'number') {
+		if ('real_id' in card && Number.isSafeInteger(cid_table[card.real_id])) {
 			card.cid = cid_table[card.real_id];
 		}
 		if ('cid' in card && 'tw_name' in card) {
@@ -358,13 +437,13 @@ function query_db(db, qstr, arg, ret) {
 			else if (md_name_jp[card.cid])
 				card.md_name_jp = md_name_jp[card.cid];
 
-			if (name_table_kr[card.cid])
-				card.kr_name = name_table_kr[card.cid];
-
 			if (name_table_en[card.cid])
 				card.en_name = name_table_en[card.cid];
 			else if (md_name_en[card.cid])
 				card.md_name_en = md_name_en[card.cid];
+
+			if (name_table_kr[card.cid])
+				card.kr_name = name_table_kr[card.cid];
 
 			if (md_name[card.cid])
 				card.md_name = md_name[card.cid];
@@ -419,12 +498,12 @@ function create_options(request_locale) {
 // export
 /**
  * Create the inverse mapping of `obj`.
- * @param {Object} obj 
+ * @param {Object} table 
  * @returns {Object}
  */
-export function inverse_mapping(obj) {
+export function inverse_mapping(table) {
 	const inverse = Object.create(null);
-	for (const [key, value] of Object.entries(obj)) {
+	for (const [key, value] of Object.entries(table)) {
 		if (inverse[value]) {
 			console.error('non-invertible', `${key}: ${value}`);
 			return Object.create(null);
@@ -487,6 +566,11 @@ export function create_choice_prerelease() {
 	return Object.fromEntries(Object.entries(inverse_table).sort((a, b) => collator.compare(a[0], b[0])));
 }
 
+/**
+ * is_alternative() - Check if the card is an alternative artwork card.
+ * @param {Card} card
+ * @returns 
+ */
 export function is_alternative(card) {
 	if (card.id === ID_BLACK_LUSTER_SOLDIER)
 		return false;
@@ -494,6 +578,11 @@ export function is_alternative(card) {
 		return Math.abs(card.id - card.alias) < 10;
 }
 
+/**
+ * is_released() - Check if the card has an official card name.
+ * @param {Card} card
+ * @returns
+ */
 export function is_released(card) {
 	return !!(card.jp_name || card.en_name);
 }
@@ -517,7 +606,7 @@ export function setcode_condition(setcode) {
  * The results are put in `ret`.
  * @param {string} qstr 
  * @param {Object} arg 
- * @param {Object[]} ret 
+ * @param {Card[]} ret 
  */
 export function query(qstr, arg, ret) {
 	ret.length = 0;
@@ -530,7 +619,7 @@ export function query(qstr, arg, ret) {
  * Query card from all databases with `alias`.
  * The results are put in `ret`.
  * @param {number} alias 
- * @param {Object[]} ret 
+ * @param {Card[]} ret 
  */
 export function query_alias(alias, ret) {
 	let qstr = `${stmt_default} AND alias == $alias;`;
@@ -544,11 +633,15 @@ export function query_alias(alias, ret) {
 
 /**
  * Get a card with `id` from all databases.
- * @param {number} id 
- * @returns {Object}
+ * @param {number|string} id 
+ * @returns {Card|null}
  */
 export function get_card(id) {
-	let qstr = `SELECT datas.id, ot, alias, type, atk, def, level, attribute, race, name, desc FROM datas, texts WHERE datas.id == $id AND datas.id == texts.id;`;
+	if (typeof id === 'string')
+		id = parseInt(id);
+	if (!Number.isSafeInteger(id))
+		return null;
+	let qstr = `${select_all} AND datas.id == $id;`;
 	let arg = new Object();
 	arg.$id = id;
 	let ret = [];
@@ -576,7 +669,7 @@ export function get_name(id, locale) {
 
 /**
  * Get the request_locale of `card` in region `locale`.
- * @param {Object} card 
+ * @param {Card} card 
  * @param {string} locale 
  * @returns {string}
  */
@@ -606,7 +699,7 @@ export function print_ad(x) {
 
 /**
  * Print the stat of `card` in language `locale`, using newline char `newline`.
- * @param {Object} card 
+ * @param {Card} card 
  * @param {string} newline 
  * @param {string} locale 
  * @returns {string}
@@ -743,26 +836,24 @@ export function print_data(card, newline, locale) {
 
 /**
  * Print `card` in language `locale`.
- * @param {object} card 
+ * @param {Card} card 
  * @param {string} locale 
  * @returns {string}
  */
 export function print_card(card, locale) {
 	let lfstr = '';
-	let lfstr_main = '';
+	let lfstr_ocg = '';
+	let lfstr_tcg = '';
 	let lfstr_md = '';
-	let seperator = '';
 
 	let strings = lang[locale];
 	let card_name = 'null';
 	let other_name = '';
 	let desc = '';
-	let ltable = null;
 
 	switch (locale) {
 		case 'zh-tw':
 			card_name = card.tw_name;
-
 			if (card.jp_name)
 				other_name += `${card.jp_name}\n`;
 			else if (card.md_name_jp)
@@ -775,7 +866,6 @@ export function print_card(card, locale) {
 			if (card.md_name)
 				other_name += `MD：${card.md_name}\n`;
 			desc = `${card.desc}\n--`;
-			ltable = ltable_ocg;
 			break;
 		case 'ja':
 			if (card.jp_name)
@@ -791,7 +881,6 @@ export function print_card(card, locale) {
 				other_name += `MD：:white_check_mark:\n`;
 			if (card.db_desc)
 				desc = card.db_desc;
-			ltable = ltable_ocg;
 			break;
 		case 'ko':
 			if (card.kr_name)
@@ -805,7 +894,6 @@ export function print_card(card, locale) {
 				other_name += `MD：:white_check_mark:\n`;
 			if (card.db_desc)
 				desc = card.db_desc;
-			ltable = ltable_ocg;
 			break;
 		case 'en':
 			if (card.en_name)
@@ -821,21 +909,25 @@ export function print_card(card, locale) {
 				other_name += `MD：:white_check_mark:\n`;
 			if (card.db_desc)
 				desc = card.db_desc;
-			ltable = ltable_tcg;
 			break;
 		default:
 			break;
 	}
 
-	if (ltable[card.real_id] !== undefined)
-		lfstr_main = `${strings.limit_name['region']}：${strings.limit_name[ltable[card.real_id]]}`;
-	if (ltable_md[card.real_id] !== undefined) {
+	if (ltable_ocg[card.real_id] !== undefined)
+		lfstr_ocg = `OCG：${strings.limit_name[ltable_ocg[card.real_id]]}`;
+	else
+		lfstr_ocg = `OCG：-`;
+	if (ltable_tcg[card.real_id] !== undefined)
+		lfstr_tcg = `TCG：${strings.limit_name[ltable_tcg[card.real_id]]}`;
+	else
+		lfstr_tcg = `TCG：-`;
+	if (ltable_md[card.real_id] !== undefined)
 		lfstr_md = `MD：${strings.limit_name[ltable_md[card.real_id]]}`;
-	}
-	if (lfstr_main && lfstr_md)
-		seperator = ' / ';
-	if (lfstr_main || lfstr_md)
-		lfstr = `(${lfstr_main}${seperator}${lfstr_md})\n`;
+	else
+		lfstr_md = `MD：-`;
+	if (ltable_ocg[card.real_id] !== undefined || ltable_tcg[card.real_id] !== undefined || ltable_md[card.real_id] !== undefined)
+		lfstr = `(${lfstr_ocg} / ${lfstr_tcg} / ${lfstr_md})\n`;
 
 	let card_text = `**${card_name}**\n${other_name}${lfstr}${print_data(card, '\n', locale)}${desc}\n`;
 	return card_text;
