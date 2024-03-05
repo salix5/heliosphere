@@ -1,5 +1,5 @@
 import { AutocompleteInteraction } from "discord.js";
-import { cid_inverse, create_choice, option_table } from "./ygo-query.mjs";
+import { cid_inverse, create_choice, escape_regexp, option_table } from "./ygo-query.mjs";
 import ruby_to_cid from './commands_data/choices_ruby.json' assert { type: 'json' };
 
 const MAX_CHOICE = 25;
@@ -26,7 +26,6 @@ choice_entries['ko'] = Object.entries(choice_table['ko']);
 export { choice_table };
 
 /**
- * toHalfWidth()
  * @param {string} str
  * @returns
  */
@@ -35,7 +34,6 @@ function toHalfWidth(str) {
 }
 
 /**
- * toFullWidth()
  * @param {string} str
  * @returns 
  */
@@ -62,7 +60,6 @@ function half_width_entries(choices) {
 }
 
 /**
- * filter_choice()
  * @param {AutocompleteInteraction} interaction 
  * @param {[string, number][]} entries 
  * @returns id list
@@ -71,7 +68,7 @@ function filter_choice(interaction, entries) {
 	const focused = interaction.options.getFocused();
 	const starts_with = [];
 	const other = [];
-	const keyword = toHalfWidth(focused).replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
+	const keyword = escape_regexp(toHalfWidth(focused));
 	const start = new RegExp(`^${keyword}`);
 	const include = new RegExp(`${keyword}`);
 	for (const [choice, id] of entries) {
@@ -104,7 +101,7 @@ export async function autocomplete_jp(interaction) {
 		const starts_with = [];
 		const other = [];
 		const id_set = new Set(ret);
-		let keyword = focused.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
+		const keyword = escape_regexp(focused);
 		const start = new RegExp(`^${keyword}`);
 		const include = new RegExp(`${keyword}`);
 		for (const [ruby, id] of ruby_entries) {
@@ -142,7 +139,7 @@ export async function autocomplete_default(interaction, request_locale) {
 	}
 	const starts_with = [];
 	const other = [];
-	let keyword = focused.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
+	const keyword = escape_regexp(focused);
 	const start = new RegExp(`^${keyword}`, 'i');
 	const include = new RegExp(`${keyword}`, 'i');
 	for (const [choice, id] of choice_entries[request_locale]) {

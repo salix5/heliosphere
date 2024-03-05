@@ -200,20 +200,28 @@ export { type, monster_type, spell_type, trap_type, race, attribute, link_marker
 const ID_TYLER_THE_GREAT_WARRIOR = 68811206;
 const ID_BLACK_LUSTER_SOLDIER = 5405695;
 const CID_BLACK_LUSTER_SOLDIER = 19092;
+const CARD_ARTWORK_VERSIONS_OFFSET = 20;
 
-const select_all = `SELECT datas.id, ot, alias, setcode, type, atk, def, level, attribute, race, name, desc FROM datas, texts WHERE datas.id == texts.id`;
-const select_id = `SELECT datas.id FROM datas, texts WHERE datas.id == texts.id`;
+const select_all = `SELECT datas.id, ot, alias, setcode, type, atk, def, level, attribute, race, name, "desc" FROM datas, texts WHERE datas.id == texts.id`;
+const select_id = `SELECT datas.id, alias FROM datas, texts WHERE datas.id == texts.id`;
 
-const base_filter = ` AND datas.id != ${ID_TYLER_THE_GREAT_WARRIOR} AND NOT type & ${TYPE_TOKEN}`;
-const physical_filter = `${base_filter} AND (datas.id == ${ID_BLACK_LUSTER_SOLDIER} OR abs(datas.id - alias) >= 10)`;
-const effect_filter = ` AND (NOT type & ${TYPE_NORMAL} OR type & ${TYPE_PENDULUM})`;
+const base_filter = ` AND datas.id != $tyler AND NOT type & $token`;
+const physical_filter = `${base_filter} AND (datas.id == $luster OR abs(datas.id - alias) >= $artwork_offset)`;
+const effect_filter = ` AND (NOT type & $normal OR type & $pendulum)`;
 
 const stmt_default = `${select_all}${physical_filter}`;
-const stmt_no_alias = `${select_id}${base_filter} AND alias == 0`;
+const stmt_no_alias = `${select_id}${base_filter} AND alias == $zero`;
+const arg_default = Object.create(null);
+arg_default.$tyler = ID_TYLER_THE_GREAT_WARRIOR;
+arg_default.$token = TYPE_TOKEN;
+arg_default.$luster = ID_BLACK_LUSTER_SOLDIER;
+arg_default.$artwork_offset = CARD_ARTWORK_VERSIONS_OFFSET;
+arg_default.$zero = 0;
+arg_default.$ub = 99999999;
 
 export {
 	ID_TYLER_THE_GREAT_WARRIOR, ID_BLACK_LUSTER_SOLDIER, CID_BLACK_LUSTER_SOLDIER,
-	select_all, select_id, base_filter, physical_filter, effect_filter, stmt_default, stmt_no_alias
+	select_all, select_id, base_filter, physical_filter, effect_filter, stmt_default, stmt_no_alias, arg_default
 };
 
 
@@ -238,23 +246,54 @@ const md_table = Object.create(null);
 md_table['en'] = md_name_en;
 md_table['ja'] = md_name_jp;
 
+const name_mapping = Object.create(null);
+for (const key of Object.keys(official_name)) {
+	let postfix = '';
+	switch (key) {
+		case 'en':
+			postfix = ' (Normal)';
+			break;
+		case 'ja':
+			postfix = '（通常モンスター）';
+			break;
+		case 'ko':
+			postfix = ' (일반)';
+			break;
+		default:
+			continue;
+	}
+	const table1 = Object.create(null);
+	Object.assign(table1, name_table[key]);
+	if (table1[CID_BLACK_LUSTER_SOLDIER])
+		table1[CID_BLACK_LUSTER_SOLDIER] = `${table1[CID_BLACK_LUSTER_SOLDIER]}${postfix}`;
+	if (md_table[key]) {
+		for (const [cid, name] of Object.entries(md_table[key])) {
+			if (table1[cid]) {
+				console.error(`duplicate cid: md_table[${key}]`, cid);
+				continue;
+			}
+			table1[cid] = name;
+		}
+	}
+	name_mapping[key] = table1;
+}
 const cid_inverse = inverse_mapping(cid_table);
 
-// id -> option name
+// [id, name] mapping
 const option_table = Object.create(null);
 option_table['en'] = create_options('en');
 option_table['ja'] = create_options('ja');
 option_table['ko'] = create_options('ko');
 
-export { lang, official_name, cid_table, name_table, md_table, cid_inverse, option_table };
+export { lang, official_name, cid_table, name_table, md_table, name_mapping, cid_inverse, option_table };
 
 const domain = 'https://salix5.github.io/cdb';
-const fetch_db = fetch(`${domain}/cards.cdb`).then(response => response.arrayBuffer());
-const fetch_db2 = fetch(`${domain}/expansions/pre-release.cdb`).then(response => response.arrayBuffer());
+const fetch_db = fetch(`${domain}/cards.cdb`).then(response => response.arrayBuffer()).then(buf => new Uint8Array(buf));
+const fetch_db2 = fetch(`${domain}/expansions/pre-release.cdb`).then(response => response.arrayBuffer()).then(buf => new Uint8Array(buf));
 const [SQL, buf1, buf2] = await Promise.all([initSqlJs(), fetch_db, fetch_db2]);
 const db_list = [];
-db_list.push(new SQL.Database(new Uint8Array(buf1)));
-db_list.push(new SQL.Database(new Uint8Array(buf2)));
+db_list.push(new SQL.Database(buf1));
+db_list.push(new SQL.Database(buf2));
 
 /**
  * @typedef {Object} Card
@@ -265,13 +304,13 @@ db_list.push(new SQL.Database(new Uint8Array(buf2)));
  * @property {number} real_id - The id of real card
  * 
  * @property {number} type
- * @property {number} color - Card color for sorting
  * @property {number} atk
  * @property {number} def
  * @property {number} level
  * @property {number} scale
  * @property {number} race
  * @property {number} attribute
+ * @property {number} color - Card color for sorting
  * 
  * @property {string} tw_name
  * @property {string} desc
@@ -299,7 +338,7 @@ function set_setcode(card, setcode) {
 		if (setcode & 0xffffn) {
 			card.setcode.push(Number(setcode & 0xffffn));
 		}
-		setcode = setcode >> 16n;
+		setcode = (setcode >> 16n) & 0xffffffffffffn;
 	}
 }
 
@@ -321,13 +360,12 @@ function is_setcode(card, value) {
 
 /**
  * Query cards from `db` using statement `qstr` and binding object `arg`, and put the results in `ret`.
- * scale = level >> 24
  * @param {initSqlJs.Database} db 
  * @param {string} qstr 
  * @param {Object} arg 
- * @param {Card[]} ret  
+ * @param {Object[]} ret  
  */
-function query_db(db, qstr, arg, ret) {
+export function query_db(db, qstr, arg, ret) {
 	if (!db)
 		return;
 
@@ -342,79 +380,17 @@ function query_db(db, qstr, arg, ret) {
 					card.setcode = [];
 					if (value) {
 						if (extra_setcode[card.id]) {
-							for (const x of extra_setcode[card.id]) {
+							for (const x of extra_setcode[card.id])
 								card.setcode.push(x);
-							}
 						}
 						else {
 							set_setcode(card, value);
 						}
 					}
 					break;
-				case 'type':
-					card[column] = Number(value);
-					if (card.type & TYPE_MONSTER) {
-						if (!(card.type & TYPE_EXTRA)) {
-							if (card.type & TYPE_TOKEN)
-								card.color = 0;
-							else if (card.type & TYPE_NORMAL)
-								card.color = 1;
-							else if (card.type & TYPE_RITUAL)
-								card.color = 3;
-							else if (card.type & TYPE_EFFECT)
-								card.color = 2;
-							else
-								card.color = -1;
-						}
-						else {
-							if (card.type & TYPE_FUSION)
-								card.color = 4;
-							else if (card.type & TYPE_SYNCHRO)
-								card.color = 5;
-							else if (card.type & TYPE_XYZ)
-								card.color = 6;
-							else if (card.type & TYPE_LINK)
-								card.color = 7;
-							else
-								card.color = -1;
-						}
-					}
-					else if (card.type & TYPE_SPELL) {
-						if (card.type === TYPE_SPELL)
-							card.color = 10;
-						else if (card.type & TYPE_QUICKPLAY)
-							card.color = 11;
-						else if (card.type & TYPE_CONTINUOUS)
-							card.color = 12;
-						else if (card.type & TYPE_EQUIP)
-							card.color = 13;
-						else if (card.type & TYPE_RITUAL)
-							card.color = 14;
-						else if (card.type & TYPE_FIELD)
-							card.color = 15;
-						else
-							card.color = -1;
-					}
-					else if (card.type & TYPE_TRAP) {
-						if (card.type === TYPE_TRAP)
-							card.color = 20;
-						else if (card.type & TYPE_CONTINUOUS)
-							card.color = 21;
-						else if (card.type & TYPE_COUNTER)
-							card.color = 22;
-						else
-							card.color = -1;
-					}
-					else {
-						card.color = -1;
-					}
-					break;
 				case 'level':
 					card.level = Number(value) & 0xff;
-					card.scale = (Number(value) >>> 24) & 0xff;
-					break;
-				case 'name':
-					card.tw_name = value;
+					card.scale = (Number(value) >> 24) & 0xff;
 					break;
 				default:
 					if (typeof value === 'bigint')
@@ -431,84 +407,125 @@ function query_db(db, qstr, arg, ret) {
 		if ('real_id' in card && Number.isSafeInteger(cid_table[card.real_id])) {
 			card.cid = cid_table[card.real_id];
 		}
-		if ('cid' in card && 'tw_name' in card) {
-			if (name_table_jp[card.cid])
-				card.jp_name = name_table_jp[card.cid];
-			else if (md_name_jp[card.cid])
-				card.md_name_jp = md_name_jp[card.cid];
-
-			if (name_table_en[card.cid])
-				card.en_name = name_table_en[card.cid];
-			else if (md_name_en[card.cid])
-				card.md_name_en = md_name_en[card.cid];
-
-			if (name_table_kr[card.cid])
-				card.kr_name = name_table_kr[card.cid];
-
-			if (md_name[card.cid])
-				card.md_name = md_name[card.cid];
-		}
 		ret.push(card);
 	}
 	stmt.free();
 }
 
-function create_options(request_locale) {
-	let postfix = '';
-	switch (request_locale) {
-		case 'en':
-			postfix = ' (Normal)';
-			break;
-		case 'ja':
-			postfix = '（通常モンスター）';
-			break;
-		case 'ko':
-			postfix = ' (일반)';
-			break;
-		default:
-			return Object.create(null);
+function finalize(card) {
+	if (card.type & TYPE_MONSTER) {
+		if (!(card.type & TYPE_EXTRA)) {
+			if (card.type & TYPE_TOKEN)
+				card.color = 0;
+			else if (card.type & TYPE_NORMAL)
+				card.color = 1;
+			else if (card.type & TYPE_RITUAL)
+				card.color = 3;
+			else if (card.type & TYPE_EFFECT)
+				card.color = 2;
+			else
+				card.color = -1;
+		}
+		else {
+			if (card.type & TYPE_FUSION)
+				card.color = 4;
+			else if (card.type & TYPE_SYNCHRO)
+				card.color = 5;
+			else if (card.type & TYPE_XYZ)
+				card.color = 6;
+			else if (card.type & TYPE_LINK)
+				card.color = 7;
+			else
+				card.color = -1;
+		}
 	}
+	else if (card.type & TYPE_SPELL) {
+		if (card.type === TYPE_SPELL)
+			card.color = 10;
+		else if (card.type & TYPE_QUICKPLAY)
+			card.color = 11;
+		else if (card.type & TYPE_CONTINUOUS)
+			card.color = 12;
+		else if (card.type & TYPE_EQUIP)
+			card.color = 13;
+		else if (card.type & TYPE_RITUAL)
+			card.color = 14;
+		else if (card.type & TYPE_FIELD)
+			card.color = 15;
+		else
+			card.color = -1;
+	}
+	else if (card.type & TYPE_TRAP) {
+		if (card.type === TYPE_TRAP)
+			card.color = 20;
+		else if (card.type & TYPE_CONTINUOUS)
+			card.color = 21;
+		else if (card.type & TYPE_COUNTER)
+			card.color = 22;
+		else
+			card.color = -1;
+	}
+	else {
+		card.color = -1;
+	}
+	card.tw_name = card.name;
+	delete card.name;
+	if (card.cid) {
+		if (name_table_jp[card.cid])
+			card.jp_name = name_table_jp[card.cid];
+		else if (md_name_jp[card.cid])
+			card.md_name_jp = md_name_jp[card.cid];
+
+		if (name_table_en[card.cid])
+			card.en_name = name_table_en[card.cid];
+		else if (md_name_en[card.cid])
+			card.md_name_en = md_name_en[card.cid];
+
+		if (name_table_kr && name_table_kr[card.cid])
+			card.kr_name = name_table_kr[card.cid];
+
+		if (md_name[card.cid])
+			card.md_name = md_name[card.cid];
+	}
+}
+
+/**
+ * Create the [id, name] mapping.
+ * @param {string} request_locale 
+ * @returns 
+ */
+function create_options(request_locale) {
 	const options = Object.create(null);
-	for (const [cid, name] of Object.entries(name_table[request_locale])) {
+	if (!name_mapping[request_locale])
+		return options;
+	for (const [cid, name] of Object.entries(name_mapping[request_locale])) {
 		if (!cid_inverse[cid]) {
 			console.error(`unknown cid:`, cid);
 			continue;
 		}
-		if (cid == CID_BLACK_LUSTER_SOLDIER)
-			options[cid_inverse[cid]] = `${name}${postfix}`;
-		else
-			options[cid_inverse[cid]] = name;
-	}
-	if (md_table[request_locale]) {
-		for (const [cid, name] of Object.entries(md_table[request_locale])) {
-			if (!cid_inverse[cid]) {
-				console.error(`unknown cid:`, cid);
-				continue;
-			}
-			if (options[cid_inverse[cid]]) {
-				console.error(`duplicate cid: md_table[${request_locale}]`, cid);
-				continue;
-			}
-			options[cid_inverse[cid]] = name;
-		}
+		options[cid_inverse[cid]] = name;
 	}
 	return options;
 }
 
 // export
 /**
- * Create the inverse mapping of `obj`.
+ * Create the inverse mapping of `table`.
  * @param {Object} table 
+ * @param {boolean} numeric_key
  * @returns {Object}
  */
-export function inverse_mapping(table) {
+export function inverse_mapping(table, numeric_key = true) {
 	const inverse = Object.create(null);
 	for (const [key, value] of Object.entries(table)) {
 		if (inverse[value]) {
 			console.error('non-invertible', `${key}: ${value}`);
 			return Object.create(null);
 		}
-		inverse[value] = parseInt(key);
+		if (numeric_key)
+			inverse[value] = Number.parseInt(key);
+		else
+			inverse[value] = key;
 	}
 	return inverse;
 }
@@ -539,21 +556,21 @@ export function create_choice(request_locale) {
 }
 
 /**
- * Create the name to id table for cards not released in Japan.
+ * Create the name to id table for pre-release cards.
  * @returns {Object}
  */
 export function create_choice_prerelease() {
 	const inverse_table = Object.create(null);
-	const pre_list = [];
-	const search_pre = `SELECT datas.id, name, desc FROM datas, texts WHERE datas.id == texts.id AND (ot == 2 OR datas.id > 99999999)${physical_filter}`;
+	const cmd_pre = `${select_all} AND datas.id > $ub${physical_filter}`;
+	const arg = Object.assign(Object.create(null), arg_default);
 	const re_kanji = /※.*/;
-	query(search_pre, {}, pre_list);
+	const pre_list = query(cmd_pre, arg);
 	for (const card of pre_list) {
-		if (name_table_jp[cid_table[card.id]] || md_name_jp[cid_table[card.id]]) {
+		if (cid_table[card.id]) {
 			continue;
 		}
-		let res = re_kanji.exec(card.desc);
-		let kanji = res ? res[0] : '';
+		const res = card.desc.match(re_kanji);
+		const kanji = res ? res[0] : '';
 		if (inverse_table[card.tw_name] || (kanji && inverse_table[kanji])) {
 			console.error('choice_prerelease', card.id);
 			return Object.create(null);
@@ -566,8 +583,42 @@ export function create_choice_prerelease() {
 	return Object.fromEntries(Object.entries(inverse_table).sort((a, b) => collator.compare(a[0], b[0])));
 }
 
+export function create_name_table() {
+	const cards = query(stmt_default, arg_default);
+	const table1 = Object.create(null);
+	const postfix = "（通常怪獸）";
+	for (const card of cards) {
+		if (card.cid)
+			table1[card.cid] = card.tw_name;
+	}
+	table1[CID_BLACK_LUSTER_SOLDIER] = `${table1[CID_BLACK_LUSTER_SOLDIER]}${postfix}`;
+	return table1;
+}
+
 /**
- * is_alternative() - Check if the card is an alternative artwork card.
+ * Check if the card name is unique.
+ * @param {Uint8Array} buffer 
+ * @returns 
+ */
+export function check_uniqueness(buffer) {
+	const db = new SQL.Database(buffer);
+	const cards = [];
+	query_db(db, stmt_default, arg_default, cards);
+	db.close();
+	console.log(cards.length);
+	const table1 = Object.create(null);
+	const postfix = "N";
+	for (const card of cards) {
+		table1[card.id] = card.name;
+	}
+	if (table1[ID_BLACK_LUSTER_SOLDIER])
+		table1[ID_BLACK_LUSTER_SOLDIER] = `${table1[ID_BLACK_LUSTER_SOLDIER]}${postfix}`;
+	const inv1 = inverse_mapping(table1);
+	return Object.keys(inv1).length === cards.length;
+}
+
+/**
+ * Check if the card is an alternative artwork card.
  * @param {Card} card
  * @returns 
  */
@@ -575,11 +626,11 @@ export function is_alternative(card) {
 	if (card.id === ID_BLACK_LUSTER_SOLDIER)
 		return false;
 	else
-		return Math.abs(card.id - card.alias) < 10;
+		return Math.abs(card.id - card.alias) < CARD_ARTWORK_VERSIONS_OFFSET;
 }
 
 /**
- * is_released() - Check if the card has an official card name.
+ * Check if the card has an official card name.
  * @param {Card} card
  * @returns
  */
@@ -589,46 +640,52 @@ export function is_released(card) {
 
 /**
  * The sqlite condition of checking setcode.
- * @param {string} setcode 
+ * @param {number} setcode
+ * @param {Object} arg
  * @returns {string}
  */
-export function setcode_condition(setcode) {
-	const setcode_str1 = `(setcode & 0xfff) == (${setcode} & 0xfff) AND (setcode & (${setcode} & 0xf000)) == (${setcode} & 0xf000)`;
-	const setcode_str2 = `(setcode >> 16 & 0xfff) == (${setcode} & 0xfff) AND (setcode >> 16 & (${setcode} & 0xf000)) == (${setcode} & 0xf000)`;
-	const setcode_str3 = `(setcode >> 32 & 0xfff) == (${setcode} & 0xfff) AND (setcode >> 32 & (${setcode} & 0xf000)) == (${setcode} & 0xf000)`;
-	const setcode_str4 = `(setcode >> 48 & 0xfff) == (${setcode} & 0xfff) AND (setcode >> 48 & (${setcode} & 0xf000)) == (${setcode} & 0xf000)`;
-	let ret = `(${setcode_str1} OR ${setcode_str2} OR ${setcode_str3} OR ${setcode_str4})`;
+export function setcode_condition(setcode, arg) {
+	const setcode_str1 = `(setcode & $mask12) == $setname AND (setcode & $settype) == $settype`;
+	const setcode_str2 = `(setcode >> $sec1 & $mask12) == $setname AND (setcode >> $sec1 & $settype) == $settype`;
+	const setcode_str3 = `(setcode >> $sec2 & $mask12) == $setname AND (setcode >> $sec2 & $settype) == $settype`;
+	const setcode_str4 = `(setcode >> $sec3 & $mask12) == $setname AND (setcode >> $sec3 & $settype) == $settype`;
+	const ret = `(${setcode_str1} OR ${setcode_str2} OR ${setcode_str3} OR ${setcode_str4})`;
+	arg.$setname = setcode & 0x0fff;
+	arg.$settype = setcode & 0xf000;
+	arg.$mask12 = 0x0fff;
+	arg.$sec1 = 16;
+	arg.$sec2 = 32;
+	arg.$sec3 = 48;
 	return ret;
 }
 
 /**
  * Query card from all databases using statement `qstr` and binding object `arg`.
- * The results are put in `ret`.
  * @param {string} qstr 
  * @param {Object} arg 
- * @param {Card[]} ret 
+ * @returns {Card[]}
  */
-export function query(qstr, arg, ret) {
-	ret.length = 0;
+export function query(qstr, arg) {
+	const ret = [];
 	for (const db of db_list) {
 		query_db(db, qstr, arg, ret);
 	}
+	for (const card of ret) {
+		finalize(card);
+	}
+	return ret;
 }
 
 /**
  * Query card from all databases with `alias`.
- * The results are put in `ret`.
  * @param {number} alias 
- * @param {Card[]} ret 
+ * @returns {Card[]}
  */
-export function query_alias(alias, ret) {
-	let qstr = `${stmt_default} AND alias == $alias;`;
-	let arg = new Object();
+export function query_alias(alias) {
+	const qstr = `${stmt_default} AND alias == $alias;`;
+	const arg = Object.assign(Object.create(null), arg_default);
 	arg.$alias = alias;
-	ret.length = 0;
-	for (const db of db_list) {
-		query_db(db, qstr, arg, ret);
-	}
+	return query(qstr, arg);
 }
 
 /**
@@ -638,17 +695,19 @@ export function query_alias(alias, ret) {
  */
 export function get_card(id) {
 	if (typeof id === 'string')
-		id = parseInt(id);
+		id = Number.parseInt(id);
 	if (!Number.isSafeInteger(id))
 		return null;
-	let qstr = `${select_all} AND datas.id == $id;`;
-	let arg = new Object();
+	const qstr = `${select_all} AND datas.id == $id;`;
+	const arg = Object.create(null);
 	arg.$id = id;
-	let ret = [];
+	const ret = [];
 	for (const db of db_list) {
 		query_db(db, qstr, arg, ret);
-		if (ret.length)
+		if (ret.length) {
+			finalize(ret[0]);
 			return ret[0];
+		}
 	}
 	return null;
 }
@@ -752,8 +811,7 @@ export function print_data(card, newline, locale) {
 			subtype += `/${strings.type_name[TYPE_EFFECT]}`;
 		data = `[${mtype}${subtype}]${newline}`;
 
-		let lv = card.level;
-		data += `${lvstr}${lv == 0 ? '?' : lv}`;
+		data += `${lvstr}${card.level === 0 ? '?' : card.level}`;
 		if (card.attribute)
 			data += `/${strings.attribute_name[card.attribute]}`;
 		else
@@ -929,7 +987,7 @@ export function print_card(card, locale) {
 	if (ltable_ocg[card.real_id] !== undefined || ltable_tcg[card.real_id] !== undefined || ltable_md[card.real_id] !== undefined)
 		lfstr = `(${lfstr_ocg} / ${lfstr_tcg} / ${lfstr_md})\n`;
 
-	let card_text = `**${card_name}**\n${other_name}${lfstr}${print_data(card, '\n', locale)}${desc}\n`;
+	const card_text = `**${card_name}**\n${other_name}${lfstr}${print_data(card, '\n', locale)}${desc}\n`;
 	return card_text;
 }
 
@@ -947,4 +1005,12 @@ export function print_qa_link(cid) {
 
 export function print_history_link(cid) {
 	return `https://github.com/salix5/ygodb/commits/master/${cid}.txt`;
+}
+
+/**
+ * @param {string} string 
+ * @returns 
+ */
+export function escape_regexp(string) {
+	return string.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&');
 }
