@@ -1,11 +1,11 @@
 import initSqlJs from 'sql.js';
-import cid_table from './data/cid.json' assert { type: 'json' };
 import ltable_ocg from './data/lflist.json' assert { type: 'json' };
 import ltable_tcg from './data/lflist_tcg.json' assert { type: 'json' };
 import ltable_md from './data/lflist_md.json' assert { type: 'json' };
 
+import cid_entry from './data/cid_table.json' assert { type: 'json' };
 import name_table_en from './data/name_table_en.json' assert { type: 'json' };
-import name_table_jp from './data/name_table.json' assert { type: 'json' };
+import name_table_jp from './data/name_table_jp.json' assert { type: 'json' };
 import name_table_kr from './data/name_table_kr.json' assert { type: 'json' };
 import md_name from './data/md_name.json' assert { type: 'json' };
 import md_name_en from './data/md_name_en.json' assert { type: 'json' };
@@ -15,6 +15,10 @@ import lang_en from './lang/en.json' assert { type: 'json' };
 import lang_ja from './lang/ja.json' assert { type: 'json' };
 import lang_ko from './lang/ko.json' assert { type: 'json' };
 import lang_zhtw from './lang/zh-tw.json' assert { type: 'json' };
+
+const domain = 'https://salix5.github.io/cdb';
+const fetch_db = fetch(`${domain}/cards.cdb`).then(response => response.arrayBuffer()).then(buf => new Uint8Array(buf));
+const fetch_db2 = fetch(`${domain}/expansions/pre-release.cdb`).then(response => response.arrayBuffer()).then(buf => new Uint8Array(buf));
 
 // type
 const TYPE_MONSTER = 0x1;
@@ -204,6 +208,7 @@ const CARD_ARTWORK_VERSIONS_OFFSET = 20;
 
 const select_all = `SELECT datas.id, ot, alias, setcode, type, atk, def, level, attribute, race, name, "desc" FROM datas, texts WHERE datas.id == texts.id`;
 const select_id = `SELECT datas.id FROM datas, texts WHERE datas.id == texts.id`;
+const select_name = `SELECT datas.id, name FROM datas, texts WHERE datas.id == texts.id`;
 
 const base_filter = ` AND datas.id != $tyler AND NOT type & $token`;
 const physical_filter = `${base_filter} AND (datas.id == $luster OR abs(datas.id - alias) >= $artwork_offset)`;
@@ -238,63 +243,46 @@ official_name['en'] = 'en_name';
 official_name['ja'] = 'jp_name';
 official_name['ko'] = 'kr_name';
 
-const name_table = Object.create(null);
-name_table['en'] = name_table_en;
-name_table['ja'] = name_table_jp;
-name_table['ko'] = name_table_kr;
-name_table['md'] = md_name;
+const game_name = Object.create(null);
+game_name['en'] = 'md_name_en';
+game_name['ja'] = 'md_name_jp';
 
-const md_table = Object.create(null);
-md_table['en'] = md_name_en;
-md_table['ja'] = md_name_jp;
-
-const name_mapping = Object.create(null);
-for (const key of Object.keys(official_name)) {
-	let postfix = '';
-	switch (key) {
-		case 'en':
-			postfix = ' (Normal)';
-			break;
-		case 'ja':
-			postfix = '（通常モンスター）';
-			break;
-		case 'ko':
-			postfix = ' (일반)';
-			break;
-		default:
-			continue;
-	}
-	const table1 = Object.create(null);
-	Object.assign(table1, name_table[key]);
-	if (table1[CID_BLACK_LUSTER_SOLDIER])
-		table1[CID_BLACK_LUSTER_SOLDIER] = `${table1[CID_BLACK_LUSTER_SOLDIER]}${postfix}`;
-	if (md_table[key]) {
-		for (const [cid, name] of Object.entries(md_table[key])) {
-			if (table1[cid]) {
-				console.error(`duplicate cid: md_table[${key}]`, cid);
-				continue;
-			}
-			table1[cid] = name;
-		}
-	}
-	name_mapping[key] = table1;
-}
+const cid_table = new Map(cid_entry);
 const cid_inverse = inverse_mapping(cid_table);
 
-// [id, name] mapping
-const option_table = Object.create(null);
-option_table['en'] = create_options('en');
-option_table['ja'] = create_options('ja');
-option_table['ko'] = create_options('ko');
+const name_table = Object.create(null);
+name_table['en'] = new Map(name_table_en);
+name_table['ja'] = new Map(name_table_jp);
+name_table['ko'] = new Map(name_table_kr);
+name_table['md'] = new Map(md_name);
+
+const md_table = Object.create(null);
+md_table['en'] = new Map(md_name_en);
+md_table['ja'] = new Map(md_name_jp);
+
+const complete_name_table = Object.create(null);
+const option_table = Object.create(null);	// [id, name] mapping
+
+for (const locale of Object.keys(official_name)) {
+	const table1 = new Map(name_table[locale]);
+	if (md_table[locale]) {
+		for (const [cid, name] of md_table[locale]) {
+			if (table1.has(cid)) {
+				console.error(`duplicate cid: md_table[${locale}]`, cid);
+				continue;
+			}
+			table1.set(cid, name);
+		}
+	}
+	complete_name_table[locale] = table1;
+	option_table[locale] = create_options(locale);
+}
 
 export {
 	lang, official_name, cid_table, name_table, md_table,
-	name_mapping, cid_inverse, option_table,
+	complete_name_table, cid_inverse, option_table,
 };
 
-const domain = 'https://salix5.github.io/cdb';
-const fetch_db = fetch(`${domain}/cards.cdb`).then(response => response.arrayBuffer()).then(buf => new Uint8Array(buf));
-const fetch_db2 = fetch(`${domain}/expansions/pre-release.cdb`).then(response => response.arrayBuffer()).then(buf => new Uint8Array(buf));
 const [SQL, buf1, buf2] = await Promise.all([initSqlJs(), fetch_db, fetch_db2]);
 const db_list = [];
 db_list.push(new SQL.Database(buf1));
@@ -348,29 +336,13 @@ function set_setcode(card, setcode) {
 }
 
 /**
- * Check if `card.setode` contains `value`.
- * @param {Card} card 
- * @param {number} value 
- * @returns
- */
-function is_setcode(card, value) {
-	const settype = value & 0x0fff;
-	const setsubtype = value & 0xf000;
-	for (const x of card.setcode) {
-		if ((x & 0x0fff) === settype && (x & 0xf000 & setsubtype) === setsubtype)
-			return true;
-	}
-	return false;
-}
-
-/**
- * Query cards from `db` using statement `qstr` and binding object `arg`, and put the results in `ret`.
+ * Query cards from `db` with statement `qstr` and binding object `arg` and put them in `ret`.
  * @param {initSqlJs.Database} db 
  * @param {string} qstr 
  * @param {Object} arg 
  * @param {Object[]} ret  
  */
-export function query_db(db, qstr, arg, ret) {
+function query_db(db, qstr, arg, ret) {
 	if (!db)
 		return;
 
@@ -409,8 +381,8 @@ export function query_db(db, qstr, arg, ret) {
 		if ('id' in card && 'alias' in card) {
 			card.real_id = is_alternative(card) ? card.alias : card.id;
 		}
-		if ('real_id' in card && Number.isSafeInteger(cid_table[card.real_id])) {
-			card.cid = cid_table[card.real_id];
+		if ('real_id' in card && cid_table.has(card.real_id)) {
+			card.cid = cid_table.get(card.real_id);
 		}
 		ret.push(card);
 	}
@@ -476,21 +448,14 @@ function finalize(card) {
 	card.tw_name = card.name;
 	delete card.name;
 	if (card.cid) {
-		if (name_table_jp[card.cid])
-			card.jp_name = name_table_jp[card.cid];
-		else if (md_name_jp[card.cid])
-			card.md_name_jp = md_name_jp[card.cid];
-
-		if (name_table_en[card.cid])
-			card.en_name = name_table_en[card.cid];
-		else if (md_name_en[card.cid])
-			card.md_name_en = md_name_en[card.cid];
-
-		if (name_table_kr && name_table_kr[card.cid])
-			card.kr_name = name_table_kr[card.cid];
-
-		if (md_name[card.cid])
-			card.md_name = md_name[card.cid];
+		for (const [locale, prop] of Object.entries(official_name)) {
+			if (name_table[locale].has(card.cid))
+				card[prop] = name_table[locale].get(card.cid);
+			else if (md_table[locale] && md_table[locale].has(card.cid))
+				card[game_name[locale]] = md_table[locale].get(card.cid);
+		}
+		if (name_table['md'].has(card.cid))
+			card.md_name = name_table['md'].get(card.cid);
 	}
 }
 
@@ -500,45 +465,80 @@ function finalize(card) {
  * @returns 
  */
 function create_options(request_locale) {
-	const options = Object.create(null);
-	if (!name_mapping[request_locale])
+	const options = new Map();
+	if (!complete_name_table[request_locale])
 		return options;
-	for (const [cid, name] of Object.entries(name_mapping[request_locale])) {
-		if (!cid_inverse[cid]) {
+	let postfix = '';
+	switch (request_locale) {
+		case 'en':
+			postfix = ' (Normal)';
+			break;
+		case 'ja':
+			postfix = '（通常モンスター）';
+			break;
+		case 'ko':
+			postfix = ' (일반)';
+			break;
+		default:
+			break;
+	}
+	for (const [cid, name] of complete_name_table[request_locale]) {
+		if (!cid_inverse.has(cid)) {
 			console.error(`unknown cid:`, cid);
 			continue;
 		}
-		options[cid_inverse[cid]] = name;
+		options.set(cid_inverse.get(cid), name);
 	}
+	if (options.has(ID_BLACK_LUSTER_SOLDIER))
+		options.set(ID_BLACK_LUSTER_SOLDIER, `${options.get(ID_BLACK_LUSTER_SOLDIER)}${postfix}`);
 	return options;
 }
 
 // export
 /**
  * Create the inverse mapping of `table`.
- * @param {Object} table 
- * @param {boolean} numeric_key
- * @returns {Object}
+ * @param {Map} table 
+ * @returns 
  */
-export function inverse_mapping(table, numeric_key = true) {
-	const inverse = Object.create(null);
-	for (const [key, value] of Object.entries(table)) {
-		if (inverse[value]) {
+export function inverse_mapping(table) {
+	const inverse = new Map();
+	for (const [key, value] of table) {
+		if (inverse.has(value)) {
 			console.error('non-invertible', `${key}: ${value}`);
-			return Object.create(null);
+			return (new Map());
 		}
-		if (numeric_key)
-			inverse[value] = Number.parseInt(key);
-		else
-			inverse[value] = key;
+		inverse.set(value, key);
 	}
 	return inverse;
 }
 
 /**
- * Create the option to id table of region `request_locale`
+ * @param {Map} table 
+ * @param {Function} compare 
+ */
+export function table_stringify(table, compare) {
+	return JSON.stringify(Array.from(table).sort(compare), null, 1);
+}
+
+/**
+ * Get cards from databases file `buffer` with statement `qstr` and binding object `arg`.
+ * @param {Uint8Array} buffer
+ * @param {string} qstr 
+ * @param {Object} arg 
+ * @returns {Object[]}
+ */
+export function load_db(buffer, qstr, arg) {
+	const db = new SQL.Database(buffer);
+	const ret = [];
+	query_db(db, qstr, arg, ret);
+	db.close();
+	return ret;
+}
+
+/**
+ * Create the [name, id] table of region `request_locale`
  * @param {string} request_locale 
- * @returns {Object}
+ * @returns 
  */
 export function create_choice(request_locale) {
 	let locale = '';
@@ -553,50 +553,56 @@ export function create_choice(request_locale) {
 			locale = 'ko-KR';
 			break;
 		default:
-			return Object.create(null);
+			return (new Map());
 	}
 	const inverse = inverse_mapping(option_table[request_locale]);
 	const collator = new Intl.Collator(locale);
-	return Object.assign(Object.create(null), Object.fromEntries(Object.entries(inverse).sort((a, b) => collator.compare(a[0], b[0]))));
+	const inverse_entries = Array.from(inverse);
+	inverse_entries.sort((a, b) => collator.compare(a[0], b[0]));
+	const result = new Map(inverse_entries);
+	return result;
 }
 
 /**
- * Create the name to id table for pre-release cards.
- * @returns {Object}
+ * Create the [name, id] table for pre-release cards.
+ * @returns 
  */
 export function create_choice_prerelease() {
-	const inverse_table = Object.create(null);
+	const inverse_table = new Map();
 	const cmd_pre = `${select_all} AND datas.id > $ub${physical_filter}`;
 	const arg = Object.assign(Object.create(null), arg_default);
 	const re_kanji = /※.*/;
 	const pre_list = query(cmd_pre, arg);
 	for (const card of pre_list) {
-		if (cid_table[card.id]) {
+		if (cid_table.has(card.id)) {
 			continue;
 		}
 		const res = card.desc.match(re_kanji);
 		const kanji = res ? res[0] : '';
-		if (inverse_table[card.tw_name] || (kanji && inverse_table[kanji])) {
+		if (inverse_table.has(card.tw_name) || kanji && inverse_table.has(kanji)) {
 			console.error('choice_prerelease', card.id);
-			return Object.create(null);
+			return (new Map());
 		}
-		inverse_table[card.tw_name] = card.id;
+		inverse_table.set(card.tw_name, card.id);
 		if (kanji)
-			inverse_table[kanji] = card.id;
+			inverse_table.set(kanji, card.id);
 	}
 	const collator = Intl.Collator('zh-Hant');
-	return Object.fromEntries(Object.entries(inverse_table).sort((a, b) => collator.compare(a[0], b[0])));
+	const inverse_entries = Array.from(inverse_table);
+	inverse_entries.sort((a, b) => collator.compare(a[0], b[0]));
+	const result = new Map(inverse_entries);
+	return result;
 }
 
 export function create_name_table() {
 	const cards = query(stmt_default, arg_default);
-	const table1 = Object.create(null);
-	const postfix = "（通常怪獸）";
+	const table1 = new Map();
+	const postfix = '（通常怪獸）';
 	for (const card of cards) {
 		if (card.cid)
-			table1[card.cid] = card.tw_name;
+			table1.set(card.cid, card.tw_name);
 	}
-	table1[CID_BLACK_LUSTER_SOLDIER] = `${table1[CID_BLACK_LUSTER_SOLDIER]}${postfix}`;
+	table1.set(CID_BLACK_LUSTER_SOLDIER, `${table1.get(CID_BLACK_LUSTER_SOLDIER)}${postfix}`);
 	return table1;
 }
 
@@ -606,13 +612,12 @@ export function create_name_table() {
  * @returns 
  */
 export function check_uniqueness(buffer) {
-	const db = new SQL.Database(buffer);
-	const cards = [];
-	query_db(db, stmt_default, arg_default, cards);
-	db.close();
-	console.log(cards.length);
+	const condition = ` AND (NOT type & $token OR alias == $zero) AND (type & $token OR datas.id == $luster OR abs(datas.id - alias) >= $artwork_offset)`;
+	const stmt1 = `${select_name}${condition}`
+	const cards = load_db(buffer, stmt1, arg_default);
+	console.log('total:', cards.length);
 	const table1 = Object.create(null);
-	const postfix = "N";
+	const postfix = 'N';
 	for (const card of cards) {
 		table1[card.id] = card.name;
 	}
@@ -644,6 +649,22 @@ export function is_released(card) {
 }
 
 /**
+ * Check if `card.setode` contains `value`.
+ * @param {Card} card 
+ * @param {number} value 
+ * @returns
+ */
+export function is_setcode(card, value) {
+	const settype = value & 0x0fff;
+	const setsubtype = value & 0xf000;
+	for (const x of card.setcode) {
+		if ((x & 0x0fff) === settype && (x & 0xf000 & setsubtype) === setsubtype)
+			return true;
+	}
+	return false;
+}
+
+/**
  * The sqlite condition of checking setcode.
  * @param {number} setcode
  * @param {Object} arg
@@ -665,7 +686,7 @@ export function setcode_condition(setcode, arg) {
 }
 
 /**
- * Query card from all databases using statement `qstr` and binding object `arg`.
+ * Query card from all databases with statement `qstr` and binding object `arg`.
  * @param {string} qstr 
  * @param {Object} arg 
  * @returns {Card[]}
@@ -724,9 +745,19 @@ export function get_card(id) {
  * @returns {string}
  */
 export function get_name(id, locale) {
-	const cid = cid_table[id];
-	if (name_table[locale] && name_table[locale][cid])
-		return name_table[locale][cid];
+	if (!cid_table.has(id))
+		return '';
+	let table = null;
+	if (locale === 'md')
+		table = name_table['md'];
+	else if (complete_name_table[locale])
+		table = complete_name_table[locale];
+	else
+		return '';
+
+	const cid = cid_table.get(id);
+	if (table.has(cid))
+		return table.get(cid);
 	else
 		return '';
 }
