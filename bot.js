@@ -1,5 +1,6 @@
-import { Client, Collection, Events, GatewayIntentBits, ChannelType, MessageType, Partials } from 'discord.js';
 import { readdirSync } from 'node:fs';
+import { Client, Collection, Events, GatewayIntentBits, ChannelType, MessageType, Partials } from 'discord.js';
+import { refresh_db } from './ygo-query.mjs';
 
 // eslint-disable-next-line no-unused-vars
 const re_wildcard = /(^|[^$])[%_]/;
@@ -15,22 +16,18 @@ client.frequency = new Collection();
 const commandsURL = new URL('commands/', import.meta.url);
 const commandFiles = readdirSync(commandsURL).filter(file => file.endsWith('.js'));
 const import_list = [];
-const url_list = [];
 for (const file of commandFiles) {
 	const fileURL = new URL(file, commandsURL);
 	import_list.push(import(fileURL));
-	url_list.push(fileURL.href);
 }
 
 const commands = await Promise.all(import_list);
-for (let i = commands.length - 1; i >= 0; --i) {
-	const command = commands[i];
-	const commandURL = url_list[i];
+for (const command of commands) {
 	if ('data' in command && 'execute' in command) {
 		client.commands.set(command.data.name, command);
 		client.frequency.set(command.data.name, 0);
 	} else {
-		console.log(`[WARNING] The command at ${commandURL} is missing a required "data" or "execute" property.`);
+		console.log(`[WARNING] The command at ${command.url} is missing a required "data" or "execute" property.`);
 	}
 }
 
@@ -40,21 +37,32 @@ client.once(Events.ClientReady, c => {
 });
 
 client.on(Events.MessageCreate, async msg => {
+	if (msg.author.id === msg.client.user.id)
+		return;
 	if (msg.channel.type === ChannelType.DM) {
-		if (msg.author.id != msg.client.user.id) {
-			console.log(msg.author.id);
-			console.log(msg.content.substring(0, 20));
-		}
-		if (msg.content === "d!") {
-			let history = await msg.channel.messages.fetch();
-			let list_delete = [];
+		console.log(msg.author.id);
+		console.log(msg.content.substring(0, 20));
+		if (msg.content === 'd!') {
+			const history = await msg.channel.messages.fetch();
+			const delete_list = [];
 			history.each((message) => {
-				if (message.type === MessageType.ChatInputCommand)
-					list_delete.push(message);
+				if (message.type === MessageType.ChatInputCommand) {
+					try {
+						delete_list.push(message.delete());
+					}
+					catch (error) {
+						console.error('delete DM');
+						console.error(error);
+					}
+				}
 			});
-			for (const message of list_delete) {
-				await message.delete();
-			}
+			await Promise.all(delete_list);
+		}
+		else if (msg.content === 'r!') {
+			if (msg.author.id !== process.env.ADMIN)
+				return;
+			await refresh_db();
+			await msg.channel.send('🤖');
 		}
 	}
 });
