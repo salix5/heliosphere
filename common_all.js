@@ -53,7 +53,7 @@ function half_width_entries(choices) {
  * @returns id list
  */
 function filter_choice(interaction, entries) {
-	const focused = interaction.options.getFocused();
+	const focused = interaction.options.getFocused().trim();
 	const starts_with = [];
 	const other = [];
 	const keyword = escape_regexp(toHalfWidth(focused));
@@ -67,7 +67,7 @@ function filter_choice(interaction, entries) {
 		if (starts_with.length >= MAX_CHOICE)
 			return starts_with;
 	}
-	let ret = starts_with.concat(other);
+	const ret = starts_with.concat(other);
 	if (ret.length > MAX_CHOICE)
 		ret.length = MAX_CHOICE;
 	return ret;
@@ -78,12 +78,12 @@ function filter_choice(interaction, entries) {
  * @param {AutocompleteInteraction} interaction
  */
 export async function autocomplete_jp(interaction) {
-	const focused = interaction.options.getFocused();
+	const focused = interaction.options.getFocused().trim();
 	if (!focused) {
 		await interaction.respond([]);
 		return;
 	}
-	let ret = filter_choice(interaction, jp_entries);
+	const ret = filter_choice(interaction, jp_entries);
 	if (ret.length < MAX_CHOICE) {
 		const ruby_max_length = MAX_CHOICE - ret.length;
 		const starts_with = [];
@@ -102,9 +102,9 @@ export async function autocomplete_jp(interaction) {
 			if (starts_with.length >= ruby_max_length)
 				break;
 		}
-		ret = ret.concat(starts_with);
+		ret.push(...starts_with);
 		if (ret.length < MAX_CHOICE)
-			ret = ret.concat(other);
+			ret.push(...other);
 		if (ret.length > MAX_CHOICE)
 			ret.length = MAX_CHOICE;
 	}
@@ -121,7 +121,7 @@ export async function autocomplete_jp(interaction) {
  * @returns 
  */
 export async function autocomplete_default(interaction, request_locale) {
-	const focused = interaction.options.getFocused();
+	const focused = interaction.options.getFocused().trim();
 	if (!focused || !choice_table[request_locale]) {
 		await interaction.respond([]);
 		return;

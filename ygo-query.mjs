@@ -5,11 +5,9 @@ import { ltable_md } from './ygo-json-loader.mjs';
 import { md_card_list } from './ygo-json-loader.mjs';
 import { cid_table } from './ygo-json-loader.mjs';
 import { lang, collator_locale, bls_postfix, official_name, game_name } from './ygo-json-loader.mjs';
-import { name_table, md_table } from './ygo-json-loader.mjs';
-
-const domain = 'https://salix5.github.io/cdb';
-const fetch_db = fetch(`${domain}/cards.cdb`).then(response => response.arrayBuffer()).then(buf => new Uint8Array(buf));
-const fetch_db2 = fetch(`${domain}/expansions/pre-release.cdb`).then(response => response.arrayBuffer()).then(buf => new Uint8Array(buf));
+import { name_table, md_table, md_table_sc } from './ygo-json-loader.mjs';
+import { inverse_mapping } from './ygo-utility.mjs';
+import { db_url1, db_url2, fetch_db } from './ygo-fetch.mjs';
 
 // type
 const TYPE_MONSTER = 0x1;
@@ -201,6 +199,8 @@ export { type, monster_type, spell_type, trap_type, race, attribute, link_marker
 // special ID
 const ID_TYLER_THE_GREAT_WARRIOR = 68811206;
 const ID_BLACK_LUSTER_SOLDIER = 5405695;
+const ALT_POLYMERIZATION = 27847700;
+const ALT_DARK_MAGICIAN = 36996508;
 const CID_BLACK_LUSTER_SOLDIER = 19092;
 const CARD_ARTWORK_VERSIONS_OFFSET = 20;
 
@@ -214,16 +214,22 @@ const effect_filter = ` AND (NOT type & $normal OR type & $pendulum)`;
 
 const stmt_default = `${select_all}${physical_filter}`;
 const stmt_no_alias = `${select_id}${base_filter} AND alias == $zero`;
-const arg_default = Object.create(null);
-arg_default.$tyler = ID_TYLER_THE_GREAT_WARRIOR;
-arg_default.$token = TYPE_TOKEN;
-arg_default.$luster = ID_BLACK_LUSTER_SOLDIER;
-arg_default.$artwork_offset = CARD_ARTWORK_VERSIONS_OFFSET;
-arg_default.$zero = 0;
-arg_default.$ub = 99999999;
+const arg_default = {
+	$tyler: ID_TYLER_THE_GREAT_WARRIOR,
+	$token: TYPE_TOKEN,
+	$luster: ID_BLACK_LUSTER_SOLDIER,
+	$artwork_offset: CARD_ARTWORK_VERSIONS_OFFSET,
+	$zero: 0,
+	$ub: 99999999,
+	$monster: TYPE_MONSTER,
+	$spell: TYPE_SPELL,
+	$trap: TYPE_TRAP,
+};
 
 export {
-	ID_TYLER_THE_GREAT_WARRIOR, ID_BLACK_LUSTER_SOLDIER, CID_BLACK_LUSTER_SOLDIER,
+	ID_TYLER_THE_GREAT_WARRIOR, ID_BLACK_LUSTER_SOLDIER,
+	ALT_DARK_MAGICIAN, ALT_POLYMERIZATION,
+	CID_BLACK_LUSTER_SOLDIER,
 	select_all, select_id, base_filter, physical_filter, effect_filter,
 	stmt_default, stmt_no_alias,
 	arg_default,
@@ -257,12 +263,35 @@ export {
 	lang, official_name,
 	cid_table, name_table, md_table,
 	complete_name_table, id_to_cid,
+	md_card_list,
 };
 
-const [SQL, buf1, buf2] = await Promise.all([initSqlJs(), fetch_db, fetch_db2]);
+/**
+ * @type {initSqlJs.Database[]}
+ */
 const db_list = [];
-db_list.push(new SQL.Database(buf1));
-db_list.push(new SQL.Database(buf2));
+
+const SQL = await initSqlJs();
+await refresh_db();
+
+/**
+ * @typedef {Object} Record
+ * @property {number} id
+ * @property {number} ot
+ * @property {number} alias
+ * @property {bigint} setcode
+ * @property {number} type
+ * @property {number} atk
+ * @property {number} def
+ * @property {number} level
+ * @property {number} race
+ * @property {number} attribute
+ * @property {number} real_id
+ * @property {number} [cid]
+ * 
+ * @property {string} name
+ * @property {string} desc
+ */
 
 /**
  * @typedef {Object} Card
@@ -283,6 +312,7 @@ db_list.push(new SQL.Database(buf2));
  * 
  * @property {string} tw_name
  * @property {string} desc
+ * @property {string} [db_desc]
  * 
  * @property {number} [cid]
  * @property {number} [md_rarity]
@@ -316,13 +346,14 @@ function set_setcode(card, setcode) {
  * Query cards from `db` with statement `qstr` and binding object `arg` and put them in `ret`.
  * @param {initSqlJs.Database} db 
  * @param {string} qstr 
- * @param {Object} arg 
- * @param {Object[]} ret  
+ * @param {initSqlJs.BindParams} arg 
+ * @returns {Record[]}
  */
-function query_db(db, qstr, arg, ret) {
+function query_db(db, qstr, arg) {
 	if (!db)
-		return;
+		return [];
 
+	const ret = [];
 	const stmt = db.prepare(qstr);
 	stmt.bind(arg);
 	while (stmt.step()) {
@@ -364,9 +395,10 @@ function query_db(db, qstr, arg, ret) {
 		ret.push(card);
 	}
 	stmt.free();
+	return ret;
 }
 
-function finalize(card) {
+function edit_card(card) {
 	if (card.type & TYPE_MONSTER) {
 		if (!(card.type & TYPE_EXTRA)) {
 			if (card.type & TYPE_TOKEN)
@@ -438,21 +470,14 @@ function finalize(card) {
 
 
 //query
-/**
- * Create the inverse mapping of `table`.
- * @param {Map} table 
- * @returns 
- */
-export function inverse_mapping(table) {
-	const inverse = new Map();
-	for (const [key, value] of table) {
-		if (inverse.has(value)) {
-			console.error('non-invertible', `${key}: ${value}`);
-			return (new Map());
-		}
-		inverse.set(value, key);
+export async function refresh_db() {
+	const [buf1, buf2] = await Promise.all([fetch_db(db_url1), fetch_db(db_url2)]);
+	for (const db of db_list) {
+		db.close();
 	}
-	return inverse;
+	db_list.length = 0;
+	db_list.push(new SQL.Database(buf1));
+	db_list.push(new SQL.Database(buf2));
 }
 
 /**
@@ -495,7 +520,7 @@ export function is_setcode(card, value) {
 /**
  * The sqlite condition of checking setcode.
  * @param {number} setcode
- * @param {Object} arg
+ * @param {initSqlJs.BindParams} arg
  * @returns {string}
  */
 export function setcode_condition(setcode, arg) {
@@ -516,16 +541,17 @@ export function setcode_condition(setcode, arg) {
 /**
  * Query card from all databases with statement `qstr` and binding object `arg`.
  * @param {string} qstr 
- * @param {Object} arg 
+ * @param {initSqlJs.BindParams} arg 
  * @returns {Card[]}
  */
 export function query(qstr, arg) {
 	const ret = [];
 	for (const db of db_list) {
-		query_db(db, qstr, arg, ret);
+		const result = query_db(db, qstr, arg);
+		ret.push(...result);
 	}
 	for (const card of ret) {
-		finalize(card);
+		edit_card(card);
 	}
 	return ret;
 }
@@ -545,7 +571,7 @@ export function query_alias(alias) {
 /**
  * Get a card with cid or temp id from all databases.
  * @param {number|string} cid 
- * @returns {Card|null}
+ * @returns {?Card}
  */
 export function get_card(cid) {
 	if (typeof cid === 'string')
@@ -556,11 +582,10 @@ export function get_card(cid) {
 	const qstr = `${select_all} AND datas.id == $id;`;
 	const arg = Object.create(null);
 	arg.$id = id;
-	const ret = [];
 	for (const db of db_list) {
-		query_db(db, qstr, arg, ret);
+		const ret = query_db(db, qstr, arg);
 		if (ret.length) {
-			finalize(ret[0]);
+			edit_card(ret[0]);
 			return ret[0];
 		}
 	}
@@ -574,6 +599,12 @@ export function get_card(cid) {
  * @returns {string}
  */
 export function get_name(cid, locale) {
+	if (locale === 'md') {
+		if (md_table_sc.has(cid))
+			return md_table_sc.get(cid);
+		else
+			return '';
+	}
 	if (!complete_name_table[locale])
 		return '';
 	if (complete_name_table[locale].has(cid)) {
@@ -864,13 +895,12 @@ export function print_card(card, locale) {
  * Get cards from databases file `buffer` with statement `qstr` and binding object `arg`.
  * @param {Uint8Array} buffer
  * @param {string} qstr 
- * @param {Object} arg 
- * @returns {Object[]}
+ * @param {initSqlJs.BindParams} arg 
+ * @returns 
  */
 export function load_db(buffer, qstr, arg) {
 	const db = new SQL.Database(buffer);
-	const ret = [];
-	query_db(db, qstr, arg, ret);
+	const ret = query_db(db, qstr, arg);
 	db.close();
 	return ret;
 }
@@ -884,7 +914,6 @@ export function check_uniqueness(buffer) {
 	const condition = ` AND (NOT type & $token OR alias == $zero) AND (type & $token OR datas.id == $luster OR abs(datas.id - alias) >= $artwork_offset)`;
 	const stmt1 = `${select_name}${condition}`
 	const cards = load_db(buffer, stmt1, arg_default);
-	console.log('total:', cards.length);
 	const table1 = new Map();
 	const postfix = 'N';
 	for (const card of cards) {
@@ -892,8 +921,29 @@ export function check_uniqueness(buffer) {
 	}
 	if (table1.has(ID_BLACK_LUSTER_SOLDIER))
 		table1.set(ID_BLACK_LUSTER_SOLDIER, `${table1.get(ID_BLACK_LUSTER_SOLDIER)}${postfix}`);
+	if (table1.has(ALT_POLYMERIZATION)) {
+		console.log('alternative Polymerization');
+		table1.delete(ALT_POLYMERIZATION);
+	}
+	if (table1.has(ALT_DARK_MAGICIAN)) {
+		console.log('alternative Dark Magician');
+		table1.delete(ALT_DARK_MAGICIAN);
+	}
+	console.log('total:', table1.size);
 	const inv1 = inverse_mapping(table1);
-	return inv1.size === cards.length;
+	return inv1.size === table1.size;
+}
+
+/**
+ * @param {number} id 
+ * @returns 
+ */
+export function get_source_cid(id) {
+	for (let i = id; i > id - CARD_ARTWORK_VERSIONS_OFFSET; --i) {
+		if (id_to_cid.has(i))
+			return id_to_cid.get(i);
+	}
+	return 0;
 }
 
 
@@ -911,6 +961,28 @@ export function create_choice(request_locale) {
 	const inverse_entries = [...inverse].sort((a, b) => collator.compare(a[0], b[0]));
 	const result = new Map(inverse_entries);
 	return result;
+}
+
+const zh_collator = new Intl.Collator(collator_locale['zh-tw']);
+/**
+ * @param {[string, number]} a 
+ * @param {[string, number]} b 
+ */
+export function zh_compare(a, b) {
+	const a0 = a[0].substring(0, 1);
+	const b0 = b[0].substring(0, 1);
+	if (a0 === '※') {
+		if (b0 === '※')
+			return zh_collator.compare(a[0].substring(1), b[0].substring(1));
+		else
+			return 1;
+	}
+	else {
+		if (b0 === '※')
+			return -1;
+		else
+			return zh_collator.compare(a[0], b[0]);
+	}
 }
 
 /**
@@ -937,8 +1009,7 @@ export function create_choice_prerelease() {
 		if (kanji)
 			inverse_table.set(kanji, card.id);
 	}
-	const collator = Intl.Collator(collator_locale['zh-tw']);
-	const inverse_entries = [...inverse_table].sort((a, b) => collator.compare(a[0], b[0]));
+	const inverse_entries = [...inverse_table].sort(zh_compare);
 	const result = new Map(inverse_entries);
 	return result;
 }
@@ -951,10 +1022,13 @@ export function create_name_table() {
 			table1.set(card.cid, card.tw_name);
 	}
 	table1.set(CID_BLACK_LUSTER_SOLDIER, `${table1.get(CID_BLACK_LUSTER_SOLDIER)}${bls_postfix['zh-tw']}`);
+	if (table1.size !== cid_table.size)
+		console.error('invalid name_table_tw:', cid_table.size, table1.size);
 	return table1;
 }
 
 export {
+	inverse_mapping,
 	print_db_link, print_yp_link, print_qa_link, print_history_link,
 	escape_regexp, map_stringify, table_stringify
 } from './ygo-utility.mjs';

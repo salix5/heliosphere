@@ -10,6 +10,7 @@ import jp_table from './data/name_table_jp.json' assert { type: 'json' };
 import kr_table from './data/name_table_kr.json' assert { type: 'json' };
 import md_en_table from './data/md_name_en.json' assert { type: 'json' };
 import md_jp_table from './data/md_name_jp.json' assert { type: 'json' };
+import md_sc from './data/md_name.json' assert { type: 'json' };
 
 import lang_ae from './lang/ae.json' assert { type: 'json' };
 import lang_en from './lang/en.json' assert { type: 'json' };
@@ -29,8 +30,9 @@ const name_table_ae = object_to_map(ae_table);
 const name_table_en = object_to_map(en_table);
 const name_table_jp = object_to_map(jp_table);
 const name_table_kr = object_to_map(kr_table);
-const md_name_en = object_to_map(md_en_table);
-const md_name_jp = object_to_map(md_jp_table);
+const md_table_en = object_to_map(md_en_table);
+const md_table_jp = object_to_map(md_jp_table);
+const md_table_sc = object_to_map(md_sc);
 
 for (const [cid, id] of cid_table) {
 	if (!name_table_en.has(cid) && !name_table_jp.has(cid)) {
@@ -77,15 +79,13 @@ name_table['ja'] = name_table_jp;
 name_table['ko'] = name_table_kr;
 
 const md_table = Object.create(null);
-md_table['en'] = md_name_en;
-md_table['ja'] = md_name_jp;
+md_table['en'] = md_table_en;
+md_table['ja'] = md_table_jp;
 
 export {
 	ltable_ocg, ltable_tcg, ltable_md,
 	md_card_list,
 	cid_table,
-	name_table_en, name_table_jp, name_table_kr,
-	md_name_en, md_name_jp,
 	lang,
 	collator_locale,
 	bls_postfix,
@@ -93,4 +93,5 @@ export {
 	game_name,
 	name_table,
 	md_table,
+	md_table_sc,
 }
