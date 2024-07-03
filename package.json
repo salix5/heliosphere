@@ -21,12 +21,12 @@
   "license": "MIT",
   "dependencies": {
     "discord.js": "14.x",
-    "sql.js": "^1.8.0"
+    "sql.js": "*"
   },
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "devDependencies": {
-    "eslint": "^8.57.0"
+    "eslint": "*"
   }
 }
