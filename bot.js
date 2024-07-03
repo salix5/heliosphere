@@ -1,12 +1,13 @@
 import { readdirSync } from 'node:fs';
 import { Client, Collection, Events, GatewayIntentBits, ChannelType, MessageType, Partials } from 'discord.js';
 import { refresh_db } from './ygo-query.mjs';
+import { deploy_command } from './deploy-commands.js';
 
 // eslint-disable-next-line no-unused-vars
 const re_wildcard = /(^|[^$])[%_]/;
 
 const client = new Client({
-	intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
+	intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages],
 	partials: [Partials.Channel]
 });
 
@@ -27,12 +28,12 @@ for (const command of commands) {
 		client.commands.set(command.data.name, command);
 		client.frequency.set(command.data.name, 0);
 	} else {
-		console.log(`[WARNING] The command at ${command.url} is missing a required "data" or "execute" property.`);
+		console.error(`[WARNING] The command at ${command.module_url} is missing a required "data" or "execute" property.`);
 	}
 }
 
 client.once(Events.ClientReady, c => {
-	let currentDate = new Date();
+	const currentDate = new Date();
 	console.log(`[${currentDate.toUTCString()}] Ready! Logged in as ${c.user.tag}`);
 });
 
@@ -45,10 +46,10 @@ client.on(Events.MessageCreate, async msg => {
 		if (msg.content === 'd!') {
 			const history = await msg.channel.messages.fetch();
 			const delete_list = [];
-			history.each((message) => {
-				if (message.type === MessageType.ChatInputCommand) {
+			history.each((old_message) => {
+				if (old_message.author.id === msg.client.user.id) {
 					try {
-						delete_list.push(message.delete());
+						delete_list.push(old_message.delete());
 					}
 					catch (error) {
 						console.error('delete DM');
@@ -58,11 +59,14 @@ client.on(Events.MessageCreate, async msg => {
 			});
 			await Promise.all(delete_list);
 		}
-		else if (msg.content === 'r!') {
-			if (msg.author.id !== process.env.ADMIN)
-				return;
-			await refresh_db();
-			await msg.channel.send('🤖');
+		if (msg.author.id === process.env.ADMIN) {
+			if (msg.content === 'r!') {
+				await refresh_db();
+				await msg.channel.send('🤖');
+			}
+			else if (msg.content === 'deploy!') {
+				await deploy_command(commands);
+			}
 		}
 	}
 });
