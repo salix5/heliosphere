@@ -95,7 +95,7 @@ const LINK_MARKER_TOP_LEFT = 0x040;		// ↖
 const LINK_MARKER_TOP = 0x080;			// ↑
 const LINK_MARKER_TOP_RIGHT = 0x100;	// ↗
 
-const type = {
+const card_type = {
 	TYPE_MONSTER,
 	TYPE_SPELL,
 	TYPE_TRAP,
@@ -135,7 +135,7 @@ const trap_type = {
 	TYPE_COUNTER,
 };
 
-const race = {
+const races = {
 	RACE_WARRIOR,
 	RACE_SPELLCASTER,
 	RACE_FAIRY,
@@ -164,7 +164,7 @@ const race = {
 	RACE_ILLUSION,
 };
 
-const attribute = {
+const attributes = {
 	ATTRIBUTE_EARTH,
 	ATTRIBUTE_WATER,
 	ATTRIBUTE_FIRE,
@@ -174,7 +174,7 @@ const attribute = {
 	ATTRIBUTE_DIVINE,
 };
 
-const link_marker = {
+const link_markers = {
 	LINK_MARKER_BOTTOM_LEFT,
 	LINK_MARKER_BOTTOM,
 	LINK_MARKER_BOTTOM_RIGHT,
@@ -194,7 +194,7 @@ const rarity = {
 	4: 'UR',
 }
 
-export { type, monster_type, spell_type, trap_type, race, attribute, link_marker };
+export { card_type, monster_type, spell_type, trap_type, races, attributes, link_markers };
 
 // special ID
 const ID_TYLER_THE_GREAT_WARRIOR = 68811206;
@@ -203,6 +203,7 @@ const ALT_POLYMERIZATION = 27847700;
 const ALT_DARK_MAGICIAN = 36996508;
 const CID_BLACK_LUSTER_SOLDIER = 19092;
 const CARD_ARTWORK_VERSIONS_OFFSET = 20;
+const MAX_CARD_ID = 99999999;
 
 const select_all = `SELECT datas.id, ot, alias, setcode, type, atk, def, level, attribute, race, name, "desc" FROM datas, texts WHERE datas.id == texts.id`;
 const select_id = `SELECT datas.id FROM datas, texts WHERE datas.id == texts.id`;
@@ -220,11 +221,13 @@ const arg_default = {
 	$luster: ID_BLACK_LUSTER_SOLDIER,
 	$artwork_offset: CARD_ARTWORK_VERSIONS_OFFSET,
 	$zero: 0,
-	$ub: 99999999,
+	$ub: MAX_CARD_ID,
 	$monster: TYPE_MONSTER,
 	$spell: TYPE_SPELL,
 	$trap: TYPE_TRAP,
+	$extra: TYPE_EXTRA,
 };
+const regexp_mention = `(?<=「)[^「」]*「?[^「」]*」?[^「」]*(?=」)`;
 
 export {
 	ID_TYLER_THE_GREAT_WARRIOR, ID_BLACK_LUSTER_SOLDIER,
@@ -233,6 +236,7 @@ export {
 	select_all, select_id, base_filter, physical_filter, effect_filter,
 	stmt_default, stmt_no_alias,
 	arg_default,
+	regexp_mention,
 };
 
 const id_to_cid = inverse_mapping(cid_table);
@@ -327,6 +331,30 @@ await refresh_db();
 const extra_setcode = {
 	8512558: [0x8f, 0x54, 0x59, 0x82, 0x13a],
 };
+
+const seventh_xyz = [];
+const seventh_attribute = new Map();
+const seventh_race = new Map();
+const stmt_seventh = `${stmt_default} AND type & $xyz AND name like $no`;
+const arg_seventh = {};
+arg_seventh.$xyz = TYPE_XYZ;
+Object.assign(arg_seventh, arg_default);
+for (let i = 0; i < 7; ++i) {
+	arg_seventh.$no = `%No.${101 + i}%`;
+	seventh_xyz[i] = query(stmt_seventh, arg_seventh);
+	for (const card of seventh_xyz[i]) {
+		if (!seventh_attribute.has(card.level))
+			seventh_attribute.set(card.level, new Map());
+		if (!seventh_attribute.get(card.level).has(card.attribute))
+			seventh_attribute.get(card.level).set(card.attribute, 101 + i);
+		if (!seventh_race.has(card.level))
+			seventh_race.set(card.level, new Map());
+		if (!seventh_race.get(card.level).has(card.race))
+			seventh_race.get(card.level).set(card.race, 101 + i);
+	}
+}
+const seventh_condition = create_seventh_condition();
+export { seventh_xyz, seventh_condition };
 
 /**
  * Set `card.setcode` from int64.
@@ -468,6 +496,27 @@ function edit_card(card) {
 	}
 }
 
+/**
+ * The sqlite condition of Monsters related to No.101 ~ No.107.
+ * @returns 
+ */
+function create_seventh_condition() {
+	let condition1 = 'FALSE';
+	for (const [level, map1] of seventh_attribute) {
+		let attr_value = 0;
+		for (const attribute of map1.keys()) {
+			attr_value |= attribute;
+		}
+		let race_value = 0;
+		for (const race of seventh_race.get(level).keys()) {
+			race_value |= race;
+		}
+		condition1 += ` OR level == ${level} AND (attribute & ${attr_value} OR race & ${race_value})`;
+	}
+	const ret = ` AND type & $monster AND NOT type & $extra AND (${condition1})`;
+	return ret;
+}
+
 
 //query
 export async function refresh_db() {
@@ -538,13 +587,14 @@ export function setcode_condition(setcode, arg) {
 	return ret;
 }
 
+
 /**
  * Query card from all databases with statement `qstr` and binding object `arg`.
  * @param {string} qstr 
  * @param {initSqlJs.BindParams} arg 
  * @returns {Card[]}
  */
-export function query(qstr, arg) {
+export function query(qstr = stmt_default, arg = arg_default) {
 	const ret = [];
 	for (const db of db_list) {
 		const result = query_db(db, qstr, arg);
@@ -578,7 +628,13 @@ export function get_card(cid) {
 		cid = Number.parseInt(cid);
 	if (!Number.isSafeInteger(cid))
 		return null;
-	const id = (cid > 99999999) ? cid : cid_table.get(cid);
+	let id = 0;
+	if (cid > MAX_CARD_ID)
+		id = cid;
+	else if (cid_table.has(cid))
+		id = cid_table.get(cid);
+	else
+		return null;
 	const qstr = `${select_all} AND datas.id == $id;`;
 	const arg = Object.create(null);
 	arg.$id = id;
@@ -640,6 +696,24 @@ export function get_request_locale(card, locale) {
 }
 
 /**
+ * Get the 101 ~ 107 number by attribute and race.
+ * @param {Card} card 
+ * @returns 
+ */
+export function get_seventh_number(card) {
+	if (!(card.type & TYPE_MONSTER) || card.type & TYPE_EXTRA)
+		return [0, 0];
+	if (!seventh_attribute.has(card.level))
+		return [0, 0];
+	let number_attr = 0, number_race = 0;
+	if (seventh_attribute.get(card.level).has(card.attribute))
+		number_attr = seventh_attribute.get(card.level).get(card.attribute);
+	if (seventh_race.get(card.level).has(card.race))
+		number_race = seventh_race.get(card.level).get(card.race);
+	return [number_attr, number_race];
+}
+
+/**
  * Print the ATK or DEF of a card.
  * @param {number} x 
  * @returns {string}
@@ -659,11 +733,11 @@ export function print_ad(x) {
  * @returns {string}
  */
 export function print_data(card, newline, locale) {
+	const strings = lang[locale];
 	let mtype = '';
 	let subtype = '';
 	let lvstr = '\u2605';
 	let data = '';
-	let strings = lang[locale];
 
 	if (card.type & TYPE_MONSTER) {
 		mtype = strings.type_name[TYPE_MONSTER];
@@ -794,12 +868,12 @@ export function print_data(card, newline, locale) {
  * @returns {string}
  */
 export function print_card(card, locale) {
+	const strings = lang[locale];
 	let lfstr = '';
 	let lfstr_ocg = '';
 	let lfstr_tcg = '';
 	let lfstr_md = '';
 
-	let strings = lang[locale];
 	let card_name = 'null';
 	let other_name = '';
 	let desc = '';
@@ -898,7 +972,7 @@ export function print_card(card, locale) {
  * @param {initSqlJs.BindParams} arg 
  * @returns 
  */
-export function load_db(buffer, qstr, arg) {
+export function load_db(buffer, qstr = stmt_default, arg = arg_default) {
 	const db = new SQL.Database(buffer);
 	const ret = query_db(db, qstr, arg);
 	db.close();
