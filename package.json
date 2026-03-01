@@ -19,12 +19,8 @@
   ],
   "author": "salix5",
   "license": "MIT",
-  "dependencies": {
-    "discord.js": "14.x",
-    "sql.js": "*"
-  },
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "devDependencies": {
     "eslint": "*"
