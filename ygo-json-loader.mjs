@@ -2,6 +2,11 @@ import ltable_ocg from './data/lflist.json' with { type: 'json' };
 import ltable_tcg from './data/lflist_tcg.json' with { type: 'json' };
 import ltable_md from './data/lflist_md.json' with { type: 'json' };
 import md_card_list from './data/CardList.json' with { type: 'json' };
+import setname_table from './data/setname.json' with { type: 'json' };
+import pack_list from './pack/pack_list.json' with { type: 'json' };
+import pre_release from './pack/pre_release.json' with { type: 'json' };
+import wiki_link from './pack/wiki_link.json' with { type: 'json' };
+import genesys_point from './data/genesys_point.json' with { type: 'json' };
 
 import cid_json from './data/cid_table.json' with { type: 'json' };
 import ae_table from './data/name_table_ae.json' with { type: 'json' };
@@ -10,88 +15,228 @@ import jp_table from './data/name_table_jp.json' with { type: 'json' };
 import kr_table from './data/name_table_kr.json' with { type: 'json' };
 import md_en_table from './data/md_name_en.json' with { type: 'json' };
 import md_jp_table from './data/md_name_jp.json' with { type: 'json' };
-import md_sc from './data/md_name.json' with { type: 'json' };
+import md_table_sc from './data/md_name.json' with { type: 'json' };
+import ruby_table from './data/name_table_ruby.json' with { type: 'json' };
+import extra_setcodes from './data/extra_setcodes.json' with { type: 'json' };
 
 import lang_ae from './lang/ae.json' with { type: 'json' };
 import lang_en from './lang/en.json' with { type: 'json' };
 import lang_ja from './lang/ja.json' with { type: 'json' };
 import lang_ko from './lang/ko.json' with { type: 'json' };
 import lang_zhtw from './lang/zh-tw.json' with { type: 'json' };
+import { inverse_mapping, inverse_table } from './ygo-utility.mjs';
+import { CID_BLACK_LUSTER_SOLDIER, CID_RITUAL_BLS, MAX_CARD_ID } from './ygo-constant.mjs';
 
+/**
+ * @param {object} obj 
+ * @returns {Map<number, any>}
+ */
 function object_to_map(obj) {
-	const map = new Map();
-	for (const [key, value] of Object.entries(obj))
-		map.set(Number.parseInt(key), value);
-	return map;
+	const result = new Map();
+	for (const [prop, value] of Object.entries(obj)) {
+		const key = Number.parseInt(prop, 10);
+		if (!Number.isSafeInteger(key)) {
+			console.error('object_to_map: invalid key', prop);
+			continue;
+		}
+		result.set(key, value);
+	}
+	return result;
 }
 
-const cid_table = object_to_map(cid_json);
-const name_table_ae = object_to_map(ae_table);
-const name_table_en = object_to_map(en_table);
-const name_table_jp = object_to_map(jp_table);
-const name_table_kr = object_to_map(kr_table);
-const md_table_en = object_to_map(md_en_table);
-const md_table_jp = object_to_map(md_jp_table);
-const md_table_sc = object_to_map(md_sc);
+export const cid_table = object_to_map(cid_json);
 
-for (const [cid, id] of cid_table) {
-	if (!name_table_en.has(cid) && !name_table_jp.has(cid)) {
-		console.error('cid_table: invalid cid', cid);
-		cid_table.delete(id);
+export const name_table = Object.create(null);
+name_table['ae'] = ae_table;
+name_table['en'] = en_table;
+name_table['ja'] = jp_table;
+name_table['ko'] = kr_table;
+
+export const md_table = Object.create(null);
+md_table['en'] = md_en_table;
+md_table['ja'] = md_jp_table;
+
+export const id_to_cid = inverse_mapping(cid_table);
+const pack_id_table = Object.fromEntries(Object.entries(pre_release).map(([k, v]) => [v, k]));
+
+export const official_name = {
+	__proto__: null,
+	'ae': 'ae_name',
+	'en': 'en_name',
+	'ja': 'jp_name',
+	'ko': 'kr_name',
+};
+
+export const lang = {
+	__proto__: null,
+	'ae': lang_ae,
+	'en': lang_en,
+	'ja': lang_ja,
+	'ko': lang_ko,
+	'zh-tw': lang_zhtw,
+};
+
+export const collator_locale = {
+	__proto__: null,
+	'ae': 'en-US',
+	'en': 'en-US',
+	'ja': 'ja-JP',
+	'ko': 'ko-KR',
+	'zh-tw': 'zh-Hant',
+};
+
+export const bls_postfix = {
+	__proto__: null,
+	'ae': ' (Normal)',
+	'en': ' (Normal)',
+	'ja': '（通常モンスター）',
+	'ko': ' (일반)',
+	'zh-tw': '（通常怪獸）',
+};
+
+export const game_name = {
+	__proto__: null,
+	'en': 'md_name_en',
+	'ja': 'md_name_jp',
+};
+
+export const complete_name_table = Object.create(null);
+for (const locale of Object.keys(official_name)) {
+	if (!md_table[locale] && !name_table[locale][CID_BLACK_LUSTER_SOLDIER]) {
+		complete_name_table[locale] = name_table[locale];
+		continue;
+	}
+	const table1 = Object.assign({}, name_table[locale]);
+	let valid = true;
+	if (md_table[locale]) {
+		for (const [cid, name] of Object.entries(md_table[locale])) {
+			if (table1[cid]) {
+				console.error(`duplicate cid: md_table[${locale}]`, cid);
+				valid = false;
+				break;
+			}
+			table1[cid] = name;
+		}
+		if (!valid) {
+			complete_name_table[locale] = {};
+			continue;
+		}
+	}
+	if (table1[CID_BLACK_LUSTER_SOLDIER]) {
+		const bls_name = `${table1[CID_BLACK_LUSTER_SOLDIER]}${bls_postfix[locale]}`;
+		table1[CID_BLACK_LUSTER_SOLDIER] = bls_name;
+	}
+	complete_name_table[locale] = table1;
+}
+
+/**
+ * Create the [name, id] table of region `request_locale`
+ * @param {string} request_locale 
+ * @returns {Map<string, number>}
+ */
+function create_choice(request_locale) {
+	if (!complete_name_table[request_locale])
+		return new Map();
+	const inverse = inverse_table(complete_name_table[request_locale]);
+	const collator = new Intl.Collator(collator_locale[request_locale]);
+	const entries = [...inverse].sort((a, b) => collator.compare(a[0], b[0]));
+	for (const entry of entries) {
+		entry[1] = cid_table.get(entry[1]);
+	}
+	return new Map(entries);
+}
+
+export const name_to_id = Object.create(null);
+for (const locale of Object.keys(official_name)) {
+	name_to_id[locale] = create_choice(locale);
+}
+
+function create_ruby_choice() {
+	const convert_map1 = object_to_map(ruby_table);
+	convert_map1.delete(CID_BLACK_LUSTER_SOLDIER);
+	const jp_collator = new Intl.Collator('ja-JP');
+	const ruby_entries = [...inverse_mapping(convert_map1)].sort((a, b) => jp_collator.compare(jp_table[a[1]], jp_table[b[1]]));
+	for (const entry of ruby_entries) {
+		entry[1] = cid_table.get(entry[1]);
+	}
+	return new Map(ruby_entries);
+}
+
+export const choices_ruby = create_ruby_choice();
+
+/**
+ * Get the pack name for pre-release id.
+ * @param {number} id
+ * @returns {string}
+ */
+export function get_pack_name(id) {
+	if (id <= MAX_CARD_ID)
+		return '';
+	const pack_id = id - id % 1000;
+	const pack_name = pack_id_table[pack_id];
+	if (!pack_name)
+		return '';
+	if (pack_name.charAt(0) === '_')
+		return pack_name.substring(1);
+	return pack_name;
+}
+
+/**
+ * Get the card name of `id` in the region `locale`.
+ * @param {number} cid 
+ * @param {string} locale 
+ * @returns {string}
+ */
+export function get_name(cid, locale) {
+	if (!complete_name_table[locale]?.[cid])
+		return '';
+	if (cid === CID_BLACK_LUSTER_SOLDIER && complete_name_table[locale][CID_RITUAL_BLS])
+		return complete_name_table[locale][CID_RITUAL_BLS];
+	return complete_name_table[locale][cid];
+}
+
+/**
+ * Add complete_name_table to the database `db`.
+ * @param {DatabaseSync} db 
+ */
+export function load_name_table(db) {
+	const table_name = 'extension';
+	db.exec(`DROP TABLE IF EXISTS ${table_name};`);
+	db.exec(`CREATE TABLE ${table_name} ("id" INTEGER PRIMARY KEY, "cid" INTEGER, "en_name" TEXT, "jp_name" TEXT, "jp_ruby" TEXT, "md_rarity" INTEGER);`);
+	const insert_name = db.prepare(`INSERT INTO ${table_name} VALUES (?, ?, ?, ?, ?, ?);`);
+	try {
+		db.exec(`BEGIN TRANSACTION;`);
+		for (const cid of cid_table.keys()) {
+			const id = cid_table.get(cid);
+			const en_name = complete_name_table['en'][cid] ?? '';
+			const jp_name = complete_name_table['ja'][cid] ?? '';
+			const jp_ruby = ruby_table[cid] ?? '';
+			const rarity = md_card_list[cid] ?? 0;
+			insert_name.run(id, cid, en_name, jp_name, jp_ruby, rarity);
+		}
+		const fix_name = db.prepare(`UPDATE ${table_name} SET en_name = ?, jp_name = ?, jp_ruby = ? WHERE id = ?;`);
+		const bls_name_en = complete_name_table['en'][CID_RITUAL_BLS] ?? '';
+		const bls_name_jp = complete_name_table['ja'][CID_RITUAL_BLS] ?? '';
+		const bls_name_ruby = ruby_table[CID_RITUAL_BLS] ?? '';
+		const bls_id = cid_table.get(CID_BLACK_LUSTER_SOLDIER);
+		fix_name.run(bls_name_en, bls_name_jp, bls_name_ruby, bls_id);
+		db.exec(`COMMIT;`);
+	}
+	catch (error) {
+		db.exec(`ROLLBACK;`);
+		console.error('Failed to load extension table:', error);
 	}
 }
-
-const official_name = Object.create(null);
-official_name['ae'] = 'ae_name';
-official_name['en'] = 'en_name';
-official_name['ja'] = 'jp_name';
-official_name['ko'] = 'kr_name';
-
-const lang = Object.create(null);
-lang['ae'] = lang_ae;
-lang['en'] = lang_en;
-lang['ja'] = lang_ja;
-lang['ko'] = lang_ko;
-lang['zh-tw'] = lang_zhtw;
-
-const collator_locale = Object.create(null);
-collator_locale['ae'] = 'en-US';
-collator_locale['en'] = 'en-US';
-collator_locale['ja'] = 'ja-JP';
-collator_locale['ko'] = 'ko-KR';
-collator_locale['zh-tw'] = 'zh-Hant';
-
-const bls_postfix = Object.create(null);
-bls_postfix['ae'] = ' (Normal)';
-bls_postfix['en'] = ' (Normal)';
-bls_postfix['ja'] = '（通常モンスター）';
-bls_postfix['ko'] = ' (일반)';
-bls_postfix['zh-tw'] = '（通常怪獸）';
-
-const game_name = Object.create(null);
-game_name['en'] = 'md_name_en';
-game_name['ja'] = 'md_name_jp';
-
-const name_table = Object.create(null);
-name_table['ae'] = name_table_ae;
-name_table['en'] = name_table_en;
-name_table['ja'] = name_table_jp;
-name_table['ko'] = name_table_kr;
-
-const md_table = Object.create(null);
-md_table['en'] = md_table_en;
-md_table['ja'] = md_table_jp;
 
 export {
 	ltable_ocg, ltable_tcg, ltable_md,
 	md_card_list,
-	cid_table,
-	lang,
-	collator_locale,
-	bls_postfix,
-	official_name,
-	game_name,
-	name_table,
-	md_table,
+	genesys_point,
 	md_table_sc,
+	extra_setcodes,
+	ruby_table,
+	setname_table,
+	pack_list,
+	pre_release,
+	wiki_link,
 }

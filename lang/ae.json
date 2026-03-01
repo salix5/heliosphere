@@ -39,6 +39,7 @@
         "unknown": "???"
     },
     "type_name": {
+        "0": "Normal",
         "1": "Monster",
         "2": "Spell",
         "4": "Trap",
@@ -66,24 +67,15 @@
     },
     "value_name": {
         "atk": "ATK ",
-        "def": "DEF ",
-        "scale": "Pendulum Scale"
-    },
-    "marker_char": {
-        "1": ":arrow_lower_left:",
-        "2": ":arrow_down:",
-        "4": ":arrow_lower_right:",
-        "8": ":arrow_left:",
-        "32": ":arrow_right:",
-        "64": ":arrow_upper_left:",
-        "128": ":arrow_up:",
-        "256": ":arrow_upper_right:",
-        "default": ":black_large_square:"
+        "def": "DEF "
     },
     "limit_name": {
         "0": ":no_entry_sign:",
         "1": ":one:",
         "2": ":two:",
         "region": "OCG"
+    },
+    "text_name":{
+        "pendulum_effect": "Pendulum Effect"
     }
 }

@@ -9,7 +9,9 @@ export { db_url1, db_url2 };
  * @returns 
  */
 export async function fetch_db(url) {
-	const response = await fetch(url);
-	const buf = await response.arrayBuffer();
-	return new Uint8Array(buf);
+	const resp = await fetch(url);
+	if (!resp.ok) {
+		throw new Error(`Failed to fetch ${url}: ${resp.status} ${resp.statusText}`);
+	}
+	return resp.bytes();
 }

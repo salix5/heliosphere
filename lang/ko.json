@@ -39,6 +39,7 @@
         "unknown": "？족"
     },
     "type_name": {
+        "0": "일반",
         "1": "몬스터",
         "2": "마법",
         "4": "함정",
@@ -66,24 +67,15 @@
     },
     "value_name": {
         "atk": "공격력 ",
-        "def": "수비력 ",
-        "scale": "펜듈럼 스케일"
-    },
-    "marker_char": {
-        "1": ":arrow_lower_left:",
-        "2": ":arrow_down:",
-        "4": ":arrow_lower_right:",
-        "8": ":arrow_left:",
-        "32": ":arrow_right:",
-        "64": ":arrow_upper_left:",
-        "128": ":arrow_up:",
-        "256": ":arrow_upper_right:",
-        "default": ":black_large_square:"
+        "def": "수비력 "
     },
     "limit_name": {
         "0": ":no_entry_sign:",
         "1": ":one:",
         "2": ":two:",
         "region": "OCG"
+    },
+    "text_name":{
+        "pendulum_effect": "펜듈럼 효과"
     }
 }
